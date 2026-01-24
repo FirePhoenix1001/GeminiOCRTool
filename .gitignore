@@ -1,0 +1,20 @@
+# --- 1. 忽略虛擬環境與系統檔 (最重要) ---
+Lib/
+Scripts/
+share/
+Include/
+pyvenv.cfg
+__pycache__/
+*.py[cod]
+
+# --- 2. 忽略打包產生的垃圾 ---
+build/
+dist/
+*.spec
+
+# --- 3. 忽略執行檔 (避免檔案過大) ---
+*.exe
+
+# --- 4. 忽略開發工具設定 ---
+.vscode/
+.idea/

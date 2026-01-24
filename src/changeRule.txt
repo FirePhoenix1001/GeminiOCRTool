@@ -1,0 +1,7 @@
+2. 數線上，已知兩點 $A(-3)$、$B(7)$，以及 $\overline{AB}$ 上一點 $P(x)$ 滿足
+$\overline{AP}:\overline{AB}=3:5$，如此 $x$ 等於？
+(A) 3 (B) 4 (C) 5 (D) 6 (E) 7
+
+
+2. 數線上，已知兩點 A(-3)、B(7)，以及 $\overline{AB}$ 上一點 P(x) 滿足$\overline{AP}:\overline{AB}$=3:5，如此 x 等於？
+(A) 3 (B) 4 (C) 5 (D) 6 (E) 7
