@@ -34,7 +34,7 @@ RULE = r"""<role>
 
 2. **純文字優先與簡化標記（最高準則）：**
    - **一般變數：** 所有的變數、數字、希臘字母、邏輯符號、比較符號，只要在 $ 之外，一律採純文字，嚴禁包進 $ 內。
-   - **上下標處理：** 在 $ 之外時，直接使用 `_` 表示下標，`^` 表示上標（例如：L_{1}, x^{2}, (y−2)^{2}）。
+   - **上下標處理：** 在 $ 之外時，直接使用 `_{}` 表示下標，`^{}` 表示上標（例如：L_{1}, x^{2}, (y−2)^{2}）。
    - **範例：** 使用 x≈y±z 而不是 $x$≈$y$±$z$。
 
 3. **符號清單（限純文字顯示）：**
@@ -78,6 +78,7 @@ RULE = r"""<role>
   正確：L_{1}: 2x−y+a=0
   正確：(x+3)^{2}+(y−2)^{2}=60
   錯誤：$L_{1}$ 或 $(x+3)^2$
+  錯誤：L_1 或 $(x+3)^2$
 
 - **分數/根號環境（使用 LaTeX 標記）：**
   正確：$\frac{\pi n_{1}}{\pi}$ = n_{1}
@@ -123,6 +124,7 @@ class OCRController:
             api_keys_text = self.app.get_api_key()
             model_name = self.app.get_model()
             rule_text = self.app.get_rule_text()
+            file_settings = self.app.get_file_settings()
 
             # 2. 初始化 Gemini (並傳入 self.log 讓錯誤訊息能回傳 GUI)
             self.log(f"\n--- 🚀 開始初始化 Gemini ({model_name}) ---")
@@ -144,11 +146,10 @@ class OCRController:
                 ext = os.path.splitext(filename)[1].lower()
 
                 if ext == ".pdf":
-                    self.process_pdf(file_path, filename)
+                    f_set = file_settings.get(file_path, {"start": 1, "end": 0})
+                    self.process_pdf(file_path, filename, f_set["start"], f_set["end"])
                 elif ext in [".png", ".jpg", ".jpeg"]:
                     self.process_image(file_path, filename)
-                elif ext in [".docx", ".doc"]:
-                    self.process_word(file_path, filename)
                 else:
                     self.log(f"⚠️ 跳過不支援的格式: {filename}")
 
@@ -168,17 +169,14 @@ class OCRController:
         try:
             result_text = gemini_identify(file_path)
             if result_text:
-                with open("OUTPUT.txt", "a", encoding="utf-8") as f:
-                    f.write(f"--- {filename} ---\n")
-                    f.write(result_text)
-                    f.write("\n\n")
-                self.log(f"✅ {filename} 辨識完成，已寫入 OUTPUT.txt")
+                self.app.append_output(f"--- {filename} ---\n{result_text}\n")
+                self.log(f"✅ {filename} 辨識完成，已輸出至畫面")
             else:
                 self.log(f"⚠️ {filename} 辨識結果為空")
         except Exception as e:
             self.log(f"❌ {filename} 失敗: {e}")
 
-    def process_pdf(self, file_path, filename):
+    def process_pdf(self, file_path, filename, start_page=1, end_page=0):
         if not pdf_to_picture:
             self.log("❌ 找不到 pdfToPicture 模組，跳過 PDF")
             return
@@ -187,7 +185,7 @@ class OCRController:
         try:
             if os.path.exists("picture"): shutil.rmtree("picture")
             
-            pdf_to_picture(file_path) # 呼叫模組
+            pdf_to_picture(file_path, start_page=start_page, end_page=end_page) # 呼叫模組
             
             if not os.path.exists("picture"):
                 self.log("❌ PDF 轉圖失敗")
@@ -200,6 +198,13 @@ class OCRController:
             img_files = sorted(os.listdir('picture'), key=extract_page_num)
             self.log(f"📄 共 {len(img_files)} 頁，開始辨識...")
 
+            pdf_basename = os.path.splitext(filename)[0]
+            txt_name = f"{pdf_basename}.txt"
+            
+            # 確保檔案為空
+            if os.path.exists(txt_name):
+                os.remove(txt_name)
+            
             full_text = ""
             for img in img_files:
                 img_path = os.path.join("picture", img)
@@ -207,12 +212,10 @@ class OCRController:
                 page_text = gemini_identify(img_path)
                 if page_text:
                     full_text += page_text + "\n\n"
-            
-            # 輸出文字檔
-            pdf_basename = os.path.splitext(filename)[0]
-            txt_name = f"{pdf_basename}.txt"
-            with open(txt_name, "w", encoding="utf-8") as f:
-                f.write(full_text)
+                    # 漸進式即時寫入文字檔
+                    with open(txt_name, "a", encoding="utf-8") as f:
+                        f.write(page_text + "\n\n")
+                    self.log(f"      (已即時儲存至 {txt_name})")
             
             # 轉 Word
             if inputWord:
@@ -225,17 +228,6 @@ class OCRController:
 
         except Exception as e:
             self.log(f"❌ PDF 處理失敗: {e}")
-
-    def process_word(self, file_path, filename):
-        if not changeWord:
-            self.log("⚠️ 暫無 Word 處理模組")
-            return
-        self.log(f"🔄 優化 Word 格式: {filename}")
-        try:
-            changeWord(file_path)
-            self.log(f"✅ Word 處理完成")
-        except Exception as e:
-            self.log(f"❌ Word 處理失敗: {e}")
 
 
 # ==========================================
@@ -269,7 +261,7 @@ elif __name__ == "__main__":
     
     # 模擬環境
     api_key_dict = {} 
-    model = "gemini-2.5-flash"
+    model = "gemini-3-flash-preview"
     
     try:
         # 1. 初始化

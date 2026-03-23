@@ -152,6 +152,33 @@ def should_retry(exception):
     retry=retry_if_exception(should_retry),
     reraise=True
 )
+def changeRule(prompt: str) -> str:
+    if client is None:
+        log_msg("❌ 錯誤：Gemini 尚未初始化")
+        return ""
+    while True:
+        try:
+            return client.models.generate_content(
+                model=model,
+                contents=[prompt]
+            ).text
+        except errors.ClientError as e:
+            err_msg = str(e)
+            should_rotate = any(keyword in err_msg for keyword in ROTATE_TRIGGER_KEYWORDS)
+            if should_rotate:
+                if rotate_key(): continue 
+                else: raise RuntimeError("All API Keys exhausted")
+            handle_fatal_error(err_msg)
+        except Exception as e:
+            log_msg(f"🚨 未預期錯誤: {e}")
+            raise e
+
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=2, min=10, max=120),
+    retry=retry_if_exception(should_retry),
+    reraise=True
+)
 def gemini_identify(pic_path: str) -> str:
     if client is None:
         log_msg("❌ 錯誤：Gemini 尚未初始化")
