@@ -5,3 +5,9 @@
 1. **複製專案**：`git clone https://github.com/FirePhoenix1001/GeminiOCRTool.git`
 2. **安裝依賴**：`pip install -r requirements.txt`
 3. **執行程式**：`python src/main.py`
+4. **打包指令**：`pyinstaller main.spec --clean`
+
+未來添加功能
+強制停止
+任務接續
+自動命名

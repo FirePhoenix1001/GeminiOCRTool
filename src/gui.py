@@ -278,9 +278,9 @@ class AIRefineWindow(ctk.CTkToplevel):
             messagebox.showinfo("複製成功", "已經將 AI 新規則複製到剪貼簿，您可以手動貼至規則編輯視窗中！")
 
 class RuleWindow(ctk.CTkToplevel):
-    def __init__(self, parent, rule_text, on_save_callback, app_instance):
+    def __init__(self, parent, rule_text, on_save_callback, default_rule_text, app_instance):
         super().__init__(parent)
-        self.title("📝 編輯 OCR 規則")
+        self.title("📝 編輯規則")
         self.geometry("600x500")
         self.resizable(True, True)
         self.transient(parent)
@@ -288,8 +288,9 @@ class RuleWindow(ctk.CTkToplevel):
         self.focus_set()
         self.on_save_callback = on_save_callback
         self.app_instance = app_instance
+        self.default_rule_text = default_rule_text
 
-        ctk.CTkLabel(self, text="📝 OCR 辨識規則 (Prompt)", font=("微軟正黑體", 16, "bold")).pack(pady=(10, 5))
+        ctk.CTkLabel(self, text="📝 辨識規則 (Prompt)", font=("微軟正黑體", 16, "bold")).pack(pady=(10, 5))
         self.rule_text_area = ctk.CTkTextbox(self, font=("微軟正黑體", 14), wrap="word")
         self.rule_text_area.pack(fill="both", expand=True, padx=20, pady=10)
         self.rule_text_area.insert("1.0", rule_text)
@@ -308,11 +309,12 @@ class RuleWindow(ctk.CTkToplevel):
 
     def reset_rule(self):
         self.rule_text_area.delete("1.0", "end")
-        self.rule_text_area.insert("1.0", self.app_instance.default_rule_text)
+        self.rule_text_area.insert("1.0", self.default_rule_text)
 
     def ai_refine_rule(self):
         current_rule = self.rule_text_area.get("1.0", "end").strip()
         AIRefineWindow(self, current_rule, app_instance=self.app_instance)
+
 
 class FileListItem(ctk.CTkFrame):
     def __init__(self, parent, file_path, delete_callback):
@@ -367,34 +369,33 @@ class FileListItem(ctk.CTkFrame):
         return None, None
 
 class GeminiOCRApp:
-    def __init__(self, root, default_rule_text=""):
+    def __init__(self, root, default_rule_text="", default_explain_rule_text=""):
         self.root = root
         self.default_rule_text = default_rule_text
         self.current_rule_text = default_rule_text
-        self.root.title("Gemini OCR 自動化轉換工具 (CTK改版)")
+        self.default_explain_rule_text = default_explain_rule_text
+        self.current_explain_rule_text = default_explain_rule_text
+        
+        self.root.title("Gemini OCR & 詳解自動化工具")
         self.root.geometry("700x750")
         
         ctk.set_appearance_mode("System")
         ctk.set_default_color_theme("blue")
 
-        # Create Tabview
-        self.tabview = ctk.CTkTabview(root)
-        self.tabview.pack(fill="both", expand=True, padx=10, pady=10)
-        self.tab_ocr = self.tabview.add("🔍 OCR 辨識")
-        self.tab_word = self.tabview.add("📄 Word 排版優化")
-
-        # ==========================================
-        # 頁籤 1: OCR 辨識
-        # ==========================================
+        # 狀態初始化
+        self.full_api_key_string = "" 
         self.selected_file_paths = []
         self.file_items = []
-        self.full_api_key_string = "" 
+        self.explain_selected_file_paths = []
+        self.explain_file_items = []
 
-        # OCR 核心設定
-        self.settings_frame = ctk.CTkFrame(self.tab_ocr, corner_radius=10)
+        # ==========================================
+        # 🔧 全域核心設定
+        # ==========================================
+        self.settings_frame = ctk.CTkFrame(root, corner_radius=10)
         self.settings_frame.pack(fill="x", padx=10, pady=5)
         
-        ctk.CTkLabel(self.settings_frame, text="🔧 核心設定", font=("微軟正黑體", 16, "bold")).pack(pady=(10, 5))
+        ctk.CTkLabel(self.settings_frame, text="🔧 核心設定 (Gemini / GPT)", font=("微軟正黑體", 16, "bold")).pack(pady=(10, 5))
 
         top_row = ctk.CTkFrame(self.settings_frame, fg_color="transparent")
         top_row.pack(fill="x", padx=10, pady=2)
@@ -415,15 +416,26 @@ class GeminiOCRApp:
         bottom_row.pack(fill="x", padx=10, pady=2)
 
         ctk.CTkLabel(bottom_row, text="當前模型: ", font=("微軟正黑體", 14, "bold")).pack(side="left", padx=5)
-        self.model_label = ctk.CTkLabel(bottom_row, text="gemini-2.5-flash", text_color="#2CC985", font=("微軟正黑體", 14))
+        self.model_label = ctk.CTkLabel(bottom_row, text="gemini-3-flash-preview", text_color="#2CC985", font=("微軟正黑體", 14))
         self.model_label.pack(side="left", padx=5)
         
-        self.rule_btn = ctk.CTkButton(bottom_row, text="📝 編輯 OCR 規則", width=120, fg_color="#8A2BE2", command=self.open_rule_window)
-        self.rule_btn.pack(side="right", padx=5)
-
         self.ignore_handwriting_var = ctk.BooleanVar(value=False)
-        self.ignore_handwriting_cb = ctk.CTkCheckBox(bottom_row, text="忽略手寫字體", variable=self.ignore_handwriting_var, font=("微軟正黑體", 14))
+        self.ignore_handwriting_cb = ctk.CTkCheckBox(bottom_row, text="忽略工作區域手寫字體", variable=self.ignore_handwriting_var, font=("微軟正黑體", 14))
         self.ignore_handwriting_cb.pack(side="right", padx=10)
+
+        # Create Tabview
+        self.tabview = ctk.CTkTabview(root)
+        self.tabview.pack(fill="both", expand=True, padx=10, pady=10)
+        self.tab_ocr = self.tabview.add("🔍 OCR 辨識")
+        self.tab_explain = self.tabview.add("💡 生成詳解")
+        self.tab_word = self.tabview.add("📄 Word 排版優化")
+
+
+        # ==========================================
+        # 頁籤 1: OCR 辨識
+        # ==========================================
+        # OCR 工作區
+
 
         # OCR 工作區
         self.middle_container = ctk.CTkFrame(self.tab_ocr, fg_color="transparent")
@@ -467,6 +479,11 @@ class GeminiOCRApp:
         self.action_frame = ctk.CTkFrame(self.tab_ocr, fg_color="transparent")
         self.action_frame.pack(fill="x", padx=10, pady=5)
 
+        ocr_row_rule = ctk.CTkFrame(self.action_frame, fg_color="transparent")
+        ocr_row_rule.pack(fill="x", pady=2)
+        self.rule_btn = ctk.CTkButton(ocr_row_rule, text="📝 編輯 OCR 規則", width=120, fg_color="#8A2BE2", command=self.open_rule_window)
+        self.rule_btn.pack(side="right", padx=5)
+
         self.start_btn = ctk.CTkButton(self.action_frame, text="開始執行轉換", font=("微軟正黑體", 16, "bold"), height=50, command=self.on_start_click)
         self.start_btn.pack(fill="x", pady=5)
 
@@ -480,8 +497,70 @@ class GeminiOCRApp:
         self.log_area.pack(fill="x", pady=(0, 5))
 
         # ==========================================
-        # 頁籤 2: Word 排版優化 (toWord)
+        # 頁籤 2: 生成詳解
         # ==========================================
+        # 詳解 工作區
+        self.explain_middle_container = ctk.CTkFrame(self.tab_explain, fg_color="transparent")
+        self.explain_middle_container.pack(fill="both", expand=True, padx=10, pady=5)
+
+        # 詳解: 左側上傳區
+        self.explain_upload_frame = ctk.CTkFrame(self.explain_middle_container, corner_radius=10, width=400)
+        self.explain_upload_frame.pack(side="left", fill="both", expand=False, padx=(0, 10))
+        
+        ex_header_f = ctk.CTkFrame(self.explain_upload_frame, fg_color="transparent")
+        ex_header_f.pack(fill="x", pady=(10, 5), padx=10)
+        ctk.CTkLabel(ex_header_f, text="📁 檔案列表 (詳解)", font=("微軟正黑體", 16, "bold")).pack(side="left")
+        
+        self.explain_file_list_frame = ctk.CTkScrollableFrame(self.explain_upload_frame, label_text="已選取 0 個檔案")
+        self.explain_file_list_frame.pack(fill="both", expand=True, padx=10, pady=5)
+
+        ex_page_range_frame = ctk.CTkFrame(self.explain_upload_frame, fg_color="transparent")
+        ex_page_range_frame.pack(fill="x", padx=10, pady=5)
+
+        ctk.CTkLabel(ex_page_range_frame, text="全體 PDF 頁數:", font=("微軟正黑體", 12)).pack(side="left", padx=2)
+        self.explain_global_start_page = ctk.CTkEntry(ex_page_range_frame, width=40, placeholder_text="1")
+        self.explain_global_start_page.pack(side="left", padx=2)
+        ctk.CTkLabel(ex_page_range_frame, text="-").pack(side="left")
+        self.explain_global_end_page = ctk.CTkEntry(ex_page_range_frame, width=40, placeholder_text="全部")
+        self.explain_global_end_page.pack(side="left", padx=2)
+
+        ex_up_btn_frame = ctk.CTkFrame(self.explain_upload_frame, fg_color="transparent")
+        ex_up_btn_frame.pack(fill="x", padx=10, pady=10)
+        ctk.CTkButton(ex_up_btn_frame, text="➕ 選擇檔案", fg_color="#3B8ED0", command=self.select_explain_files).pack(side="left", fill="x", expand=True, padx=2)
+        ctk.CTkButton(ex_up_btn_frame, text="🗑️ 清空所有", width=80, fg_color="#FF5555", command=self.clear_explain_files).pack(side="right", padx=2)
+
+        # 詳解: 右側輸出區
+        self.explain_output_frame = ctk.CTkFrame(self.explain_middle_container, corner_radius=10)
+        self.explain_output_frame.pack(side="right", fill="both", expand=True)
+
+        ctk.CTkLabel(self.explain_output_frame, text="📄 詳解生成 (OUTPUT)", font=("微軟正黑體", 16, "bold")).pack(pady=(10, 5))
+        self.explain_output_text_area = ctk.CTkTextbox(self.explain_output_frame, font=("微軟正黑體", 14), wrap="word")
+        self.explain_output_text_area.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        # 詳解: 執行區
+        self.explain_action_frame = ctk.CTkFrame(self.tab_explain, fg_color="transparent")
+        self.explain_action_frame.pack(fill="x", padx=10, pady=5)
+
+        row_rule = ctk.CTkFrame(self.explain_action_frame, fg_color="transparent")
+        row_rule.pack(fill="x", pady=2)
+        ctk.CTkButton(row_rule, text="📝 編輯詳解規則", width=120, fg_color="#8A2BE2", command=self.open_explain_rule_window).pack(side="right", padx=5)
+
+        self.explain_start_btn = ctk.CTkButton(self.explain_action_frame, text="開始執行轉換", font=("微軟正黑體", 16, "bold"), height=50, command=self.on_start_click)
+        self.explain_start_btn.pack(fill="x", pady=5)
+
+        ex_log_header_frame = ctk.CTkFrame(self.explain_action_frame, fg_color="transparent")
+        ex_log_header_frame.pack(fill="x", pady=(5, 0))
+
+        ctk.CTkLabel(ex_log_header_frame, text="執行日誌:", font=("微軟正黑體", 12)).pack(side="left")
+        ctk.CTkButton(ex_log_header_frame, text="🗑️ 清空日誌", width=80, height=24, fg_color="#555555", command=self.clear_explain_log).pack(side="right")
+
+        self.explain_log_area = ctk.CTkTextbox(self.explain_action_frame, height=100, state="disabled", font=("微軟正黑體", 12))
+        self.explain_log_area.pack(fill="x", pady=(0, 5))
+
+        # ==========================================
+        # 頁籤 3: Word 排版優化 (toWord)
+        # ==========================================
+
         self.word_selected_files = []
         
         title_frame = ctk.CTkFrame(self.tab_word, fg_color="transparent")
@@ -608,16 +687,64 @@ class GeminiOCRApp:
 
 
     def open_rule_window(self):
-        RuleWindow(self.root, self.current_rule_text, self.on_rule_saved, app_instance=self)
+        RuleWindow(self.root, self.current_rule_text, self.on_rule_saved, self.default_rule_text, app_instance=self)
+
         
     def on_rule_saved(self, text):
         self.current_rule_text = text
         self.log("✅ OCR 規則已保存。")
 
+    def open_explain_rule_window(self):
+        RuleWindow(self.root, self.current_explain_rule_text, self.on_explain_rule_saved, self.default_explain_rule_text, app_instance=self)
+        
+    def on_explain_rule_saved(self, text):
+        self.current_explain_rule_text = text
+        self.explain_log("✅ 詳解規則已保存。")
+
+    def explain_log(self, message):
+        self.explain_log_area.configure(state="normal")
+        self.explain_log_area.insert("end", message + "\n")
+        self.explain_log_area.see("end")
+        self.explain_log_area.configure(state="disabled")
+
+    def clear_explain_log(self):
+        self.explain_log_area.configure(state="normal")
+        self.explain_log_area.delete("1.0", "end")
+        self.explain_log_area.configure(state="disabled")
+
+
     def clear_log(self):
         self.log_area.configure(state="normal")
         self.log_area.delete("1.0", "end")
         self.log_area.configure(state="disabled")
+
+    def select_explain_files(self):
+        files = filedialog.askopenfilenames(
+            title="請選擇要處理的圖片或 PDF",
+            filetypes=[("圖片與 PDF", "*.png;*.jpg;*.jpeg;*.pdf"), ("所有檔案", "*.*")]
+        )
+        if files:
+            for f in files:
+                if f not in self.explain_selected_file_paths:
+                    self.explain_selected_file_paths.append(f)
+                    item = FileListItem(self.explain_file_list_frame, f, self.remove_single_explain_file)
+                    self.explain_file_items.append(item)
+            self.explain_file_list_frame.configure(label_text=f"已選取 {len(self.explain_selected_file_paths)} 個檔案")
+
+    def remove_single_explain_file(self, path, item_widget):
+        if path in self.explain_selected_file_paths:
+            self.explain_selected_file_paths.remove(path)
+        if item_widget in self.explain_file_items:
+            self.explain_file_items.remove(item_widget)
+        item_widget.destroy()
+        self.explain_file_list_frame.configure(label_text=f"已選取 {len(self.explain_selected_file_paths)} 個檔案")
+
+    def clear_explain_files(self):
+        self.explain_selected_file_paths = []
+        for item in self.explain_file_items:
+            item.destroy()
+        self.explain_file_items = []
+        self.explain_file_list_frame.configure(label_text="已選取 0 個檔案")
 
     def select_files(self):
         files = filedialog.askopenfilenames(
@@ -631,6 +758,7 @@ class GeminiOCRApp:
                     item = FileListItem(self.file_list_frame, f, self.remove_single_file)
                     self.file_items.append(item)
             self.file_list_frame.configure(label_text=f"已選取 {len(self.selected_file_paths)} 個檔案")
+
 
     def remove_single_file(self, path, item_widget):
         if path in self.selected_file_paths:
@@ -648,16 +776,19 @@ class GeminiOCRApp:
         self.file_list_frame.configure(label_text="已選取 0 個檔案")
 
     def on_start_click(self):
-        self.log("🚀 開始處理...")
-        self.log(f"📝 規則預覽 (前10字): {self.current_rule_text[:10]}...")
-        gst = self.global_start_page.get()
-        ged = self.global_end_page.get()
-        self.log(f"🌐 全體 PDF 設定: {gst} 到 {ged}")
-        
-        for item in self.file_items:
-            if item.is_pdf:
-                s, e = item.get_individual_settings()
-                self.log(f"📄 PDF [{os.path.basename(item.file_path)}] - 個別設定頁數: {s} 到 {e}")
+        current_tab = self.tabview.get()
+        if "OCR" in current_tab:
+            self.log("🚀 開始處理 OCR...")
+            # 這裡的邏輯由 main.py 的 OCRController 接管，只需印出日誌供參考
+            gst = self.global_start_page.get()
+            ged = self.global_end_page.get()
+            self.log(f"🌐 全體 PDF 設定: {gst} 到 {ged}")
+        else:
+            self.explain_log("🚀 開始處理詳解生成...")
+            egst = self.explain_global_start_page.get()
+            eged = self.explain_global_end_page.get()
+            self.explain_log(f"🌐 全體 PDF 設定: {egst} 到 {eged}")
+
 
     def log(self, message):
         self.log_area.configure(state="normal")
@@ -668,6 +799,11 @@ class GeminiOCRApp:
     def append_output(self, text):
         self.output_text_area.insert('end', text + '\n')
         self.output_text_area.see('end')
+        
+    def append_explain_output(self, text):
+        self.explain_output_text_area.insert('end', text + '\n')
+        self.explain_output_text_area.see('end')
+
 
     def get_api_key(self): return self.full_api_key_string or os.environ.get("GEMINI_API_KEY", "")
     def get_model(self): return self.model_label.cget("text")
@@ -676,7 +812,12 @@ class GeminiOCRApp:
         if hasattr(self, 'ignore_handwriting_var') and self.ignore_handwriting_var.get():
             base_rule += "\n\n<additional_rule>\n請完全忽略圖片中的任何「手寫字體」、「手寫筆記」或「手寫塗鴉」，僅辨識並輸出原始的「印刷字體」內容。\n</additional_rule>"
         return base_rule
+    
+    def get_explain_rule_text(self):
+        return self.current_explain_rule_text
+
     def get_selected_files(self): return self.selected_file_paths
+    def get_explain_selected_files(self): return self.explain_selected_file_paths
     
     def get_file_settings(self):
         try: gs = int(self.global_start_page.get()) if self.global_start_page.get() else 1
@@ -686,6 +827,23 @@ class GeminiOCRApp:
         
         settings = {}
         for item in self.file_items:
+            path = item.file_path
+            s, e = gs, ge
+            if item.is_pdf:
+                indy_s, indy_e = item.get_individual_settings()
+                if indy_s is not None: s = indy_s
+                if indy_e is not None: e = indy_e
+            settings[path] = {"start": s, "end": e}
+        return settings
+
+    def get_explain_file_settings(self):
+        try: gs = int(self.explain_global_start_page.get()) if self.explain_global_start_page.get() else 1
+        except: gs = 1
+        try: ge = int(self.explain_global_end_page.get()) if self.global_end_page.get() else 0
+        except: ge = 0
+        
+        settings = {}
+        for item in self.explain_file_items:
             path = item.file_path
             s, e = gs, ge
             if item.is_pdf:
