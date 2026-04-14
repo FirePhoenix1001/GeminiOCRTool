@@ -18,7 +18,8 @@ except ImportError:
     inputWord = None
     changeWord = None
 
-from gemini import gemini_identify, setup_gemini
+from gemini import GeminiProcessor
+from gpt import GPTProcessor
 
 # ==========================================
 # 預設規則 (Prompt)
@@ -143,43 +144,53 @@ RULE_EXPLAIN = r"""<role>
 class OCRController:
     def __init__(self, app):
         self.app = app
-        # 【關鍵步驟】覆寫 GUI 的按鈕指令，指向這裡的 run_thread
-        self.app.start_btn.configure(command=lambda: self.run_thread(mode="ocr"))
+        self.stop_requested = False
+        self.processor = None
         
-        # 如果有詳解按鈕，也一併綁定
+        # 綁定按鈕
+        self.app.start_btn.configure(command=lambda: self.run_thread(mode="ocr"))
+        self.app.stop_btn.configure(command=self.stop_process)
+        
         if hasattr(self.app, 'explain_start_btn'):
             self.app.explain_start_btn.configure(command=lambda: self.run_thread(mode="explain"))
+        if hasattr(self.app, 'explain_stop_btn'):
+            self.app.explain_stop_btn.configure(command=self.stop_process)
 
     def log(self, msg, mode="ocr"):
-        """ 轉發訊息給 GUI 的 Log 視窗 """
         if mode == "ocr":
             self.app.log(msg)
         else:
             self.app.explain_log(msg)
 
+    def stop_process(self):
+        """ 發送停止請求 """
+        self.stop_requested = True
+        self.log("\n🛑 正在請求停止，請稍候於當前頁面完成後結束...", mode="ocr")
+        self.log("\n🛑 正在請求停止，請稍候於當前頁面完成後結束...", mode="explain")
+
     def run_thread(self, mode="ocr"):
-        """ 啟動多執行緒，避免 GUI 卡死 """
         files = self.app.get_selected_files() if mode == "ocr" else self.app.get_explain_selected_files()
         
         if not files:
-            msg = "⚠️ 請先選擇至少一個檔案！"
+            msg = "⚠️ 請選取檔案！"
             if mode == "ocr": self.app.log(msg)
             else: self.app.explain_log(msg)
             return
 
-        # 鎖定按鈕，顯示處理中
-        if mode == "ocr":
-            self.app.start_btn.configure(state="disabled", text="⏳ 正在處理中...")
-        else:
-            self.app.explain_start_btn.configure(state="disabled", text="⏳ 正在處理中...")
+        self.stop_requested = False
         
-        # 開啟背景執行緒跑 run_process
+        # UI 狀態轉換
+        if mode == "ocr":
+            self.app.start_btn.configure(state="disabled", text="⏳ 處理中...")
+            self.app.stop_btn.configure(state="normal")
+        else:
+            self.app.explain_start_btn.configure(state="disabled", text="⏳ 處理中...")
+            self.app.explain_stop_btn.configure(state="normal")
+        
         threading.Thread(target=self.run_process, args=(mode,), daemon=True).start()
 
     def run_process(self, mode="ocr"):
-        """ 真正執行 OCR 的邏輯 (背景執行) """
         try:
-            # 1. 取得 GUI 設定
             if mode == "ocr":
                 files = self.app.get_selected_files()
                 rule_text = self.app.get_rule_text()
@@ -192,165 +203,216 @@ class OCRController:
             api_keys_text = self.app.get_api_key()
             model_name = self.app.get_model()
 
-            # 2. 初始化 Gemini (並傳入 self.log 讓錯誤訊息能回傳 GUI)
-            self.log(f"\n--- 🚀 開始初始化 Gemini ({model_name}) ---", mode=mode)
+            self.log(f"", mode=mode)
             try:
-                setup_gemini(api_keys_text, model_name, rule_text, log_callback=lambda m: self.log(m, mode=mode))
+                if "gpt" in model_name.lower():
+                    self.processor = GPTProcessor(api_keys_text, model_name, rule_text, log_callback=lambda m: self.log(m, mode=mode))
+                    identify_func = self.processor.gpt_identify
+                else:
+                    self.processor = GeminiProcessor(api_keys_text, model_name, rule_text, log_callback=lambda m: self.log(m, mode=mode))
+                    identify_func = self.processor.gemini_identify
             except Exception as e:
                 self.log(f"❌ 初始化失敗: {e}", mode=mode)
-                return # 終止
+                return
 
-            # 3. 逐一處理檔案
             total_files = len(files)
-            self.log(f"--- 📂 準備處理 {total_files} 個檔案 ---\n", mode=mode)
+            self.log(f"", mode=mode)
 
             for idx, file_path in enumerate(files):
+                if self.stop_requested: break
+                
                 filename = os.path.basename(file_path)
                 self.log(f"正在處理 ({idx+1}/{total_files}): {filename}", mode=mode)
 
-                # 判斷副檔名
                 ext = os.path.splitext(filename)[1].lower()
-
                 if ext == ".pdf":
-                    f_set = file_settings.get(file_path, {"start": 1, "end": 0})
-                    self.process_pdf(file_path, filename, f_set["start"], f_set["end"], mode=mode)
+                    f_set = file_settings.get(file_path, {"start": 1, "end": 0, "output_name": None})
+                    self.process_pdf(file_path, filename, f_set["start"], f_set["end"], identify_func, mode=mode, output_name=f_set.get("output_name"))
                 elif ext in [".png", ".jpg", ".jpeg"]:
-                    self.process_image(file_path, filename, mode=mode)
+                    f_set = file_settings.get(file_path, {"output_name": None})
+                    self.process_image(file_path, filename, identify_func, mode=mode, output_name=f_set.get("output_name"))
                 else:
-                    self.log(f"⚠️ 跳過不支援的格式: {filename}", mode=mode)
+                    self.log(f"⚠️ 跳過不支援格式: {filename}", mode=mode)
 
-            self.log("\n✅ ✅ ✅ 所有任務執行完畢！", mode=mode)
+            if self.stop_requested:
+                self.log("\n🛑 任務已由使用者手動中斷。", mode=mode)
+            else:
+                self.log("\n✅ ✅ ✅ 所有任務執行完畢！", mode=mode)
 
         except Exception as e:
-            self.log(f"\n❌ 發生嚴重錯誤: {e}", mode=mode)
-            traceback.print_exc() # 同時印在終端機方便除錯
-        
+            self.log(f"\n❌ 發生錯誤: {e}", mode=mode)
+            traceback.print_exc()
         finally:
-            # 無論成功或失敗，最後都要恢復按鈕
+            self.processor = None
             if mode == "ocr":
-                self.app.start_btn.configure(state="normal", text="儲存設定並開始執行")
+                self.app.start_btn.configure(state="normal", text="開始進行轉換")
+                self.app.stop_btn.configure(state="disabled")
             else:
-                self.app.explain_start_btn.configure(state="normal", text="儲存設定並開始執行")
+                self.app.explain_start_btn.configure(state="normal", text="開始進行轉換")
+                self.app.explain_stop_btn.configure(state="disabled")
 
-    # --- 個別檔案處理邏輯 ---
-
-    def process_image(self, file_path, filename, mode="ocr"):
+    def process_image(self, file_path, filename, identify_func, mode="ocr", output_name=None):
         try:
-            result_text = gemini_identify(file_path)
+            # 如果 output_name 沒給，預設就是 base_name
+            if not output_name:
+                output_name = base_name
+            else:
+                # 去除可能帶有的 .doc 或 .docx 後綴
+                if output_name.lower().endswith(".docx"): output_name = output_name[:-5]
+                if output_name.lower().endswith(".doc"): output_name = output_name[:-4]
+
+            # 暫存檔名改為以自定義名稱為主
+            txt_name = f"{output_name}.txt"
+            
+            # 檢查是否已經處理過且有內容 (雖然單張圖片通常不接續，但為了邏輯統一)
+            existing_text = ""
+            if os.path.exists(txt_name):
+                with open(txt_name, "r", encoding="utf-8") as f:
+                    existing_text = f.read().strip()
+            
+            if existing_text:
+                self.log(f"ℹ️ {filename} 已有現存辨識內容，將直接使用現有內容。", mode=mode)
+                result_text = existing_text
+            else:
+                result_text = identify_func(file_path)
+                if result_text:
+                    with open(txt_name, "w", encoding="utf-8") as f:
+                        f.write(result_text)
+            
             if result_text:
                 if mode == "ocr":
                     self.app.append_output(f"--- {filename} ---\n{result_text}\n")
                 else:
                     self.app.append_explain_output(f"--- {filename} ---\n{result_text}\n")
-                self.log(f"✅ {filename} 處理完成，已輸出至畫面", mode=mode)
+                
+                # 圖片也支援轉 Word (如果使用者需要)
+                if inputWord:
+                    # 重新從文字文件讀取內容 (以文字文件為準)
+                    with open(txt_name, "r", encoding="utf-8") as f:
+                        final_text = f.read()
+                    self.log(f"✅ 寫入 Word: {output_name}.docx", mode=mode)
+                    inputWord(final_text, output_name)
+                    
+                self.log(f"✅ {filename} 處理完成", mode=mode)
+                
+                # 辨識成功完成後，刪除暫存的 .txt (除非意外暫停或停止，目前是非 stop 狀態)
+                if not self.stop_requested and os.path.exists(txt_name):
+                    try: os.remove(txt_name)
+                    except: pass
             else:
-                self.log(f"⚠️ {filename} 辨識結果為空", mode=mode)
+                self.log(f"⚠️ {filename} 結果為空", mode=mode)
         except Exception as e:
             self.log(f"❌ {filename} 失敗: {e}", mode=mode)
 
-    def process_pdf(self, file_path, filename, start_page=1, end_page=0, mode="ocr"):
+    def process_pdf(self, file_path, filename, start_page, end_page, identify_func, mode="ocr", output_name=None):
         if not pdf_to_picture:
-            self.log("❌ 找不到 pdfToPicture 模組，跳過 PDF", mode=mode)
+            self.log("❌ 找不到 pdfToPicture 模組", mode=mode)
             return
 
-        self.log(f"🔄 正在將 {filename} 轉換為圖片...", mode=mode)
+        self.log(f"", mode=mode)
         try:
             if os.path.exists("picture"): shutil.rmtree("picture")
-            
-            pdf_to_picture(file_path, start_page=start_page, end_page=end_page) # 呼叫模組
+            pdf_to_picture(file_path, start_page=start_page, end_page=end_page)
             
             if not os.path.exists("picture"):
                 self.log("❌ PDF 轉圖失敗", mode=mode)
                 return
 
-            def extract_page_num(fname):
+            def extract_page_num_local(fname):
                 match = re.search(r'page_(\d+)', fname)
                 return int(match.group(1)) if match else 0
 
-            img_files = sorted(os.listdir('picture'), key=extract_page_num)
+            img_files = sorted(os.listdir('picture'), key=extract_page_num_local)
             self.log(f"📄 共 {len(img_files)} 頁，開始處理...", mode=mode)
 
             pdf_basename = os.path.splitext(filename)[0]
-            txt_name = f"{pdf_basename}.txt"
+            # 如果 output_name 沒給，預設就是 pdf_basename
+            if not output_name:
+                output_name = pdf_basename
+            else:
+                if output_name.lower().endswith(".docx"): output_name = output_name[:-5]
+                if output_name.lower().endswith(".doc"): output_name = output_name[:-4]
+
+            # 暫存檔名改為以自定義名稱為主
+            txt_name = f"{output_name}.txt"
             
-            # 確保檔案為空
+            # 讀取現有內容
+            existing_content = ""
             if os.path.exists(txt_name):
-                os.remove(txt_name)
+                with open(txt_name, "r", encoding="utf-8") as f:
+                    existing_content = f.read()
             
-            full_text = ""
             for img in img_files:
+                if self.stop_requested: break
+                
+                # 提取當前頁碼
+                page_n = extract_page_num_local(img)
+                marker = f"##### Page {page_n} #####"
+                
+                # 檢查是否已經在文字檔案中
+                if marker in existing_content:
+                    self.log(f"   -> 跳過已存在頁面: {img}", mode=mode)
+                    continue
+
                 img_path = os.path.join("picture", img)
                 self.log(f"   -> 處理頁面: {img}", mode=mode)
-                page_text = gemini_identify(img_path)
+                page_text = identify_func(img_path)
+                
                 if page_text:
-                    full_text += page_text + "\n\n"
-                    # 漸進式即時寫入文字檔
                     with open(txt_name, "a", encoding="utf-8") as f:
-                        f.write(page_text + "\n\n")
-                    self.log(f"      (已即時儲存至 {txt_name})", mode=mode)
+                        f.write(f"{marker}\n{page_text}\n\n")
             
-            # 增加輸出到 GUI
-            if mode == "ocr":
-                self.app.append_output(f"--- {filename} ---\n{full_text}\n")
-            else:
-                self.app.append_explain_output(f"--- {filename} ---\n{full_text}\n")
+            # 最後以文字文件的內容為主，生成 Word
+            if not self.stop_requested:
+                if os.path.exists(txt_name):
+                    with open(txt_name, "r", encoding="utf-8") as f:
+                        final_raw_content = f.read()
+                    
+                    # 過濾掉頁碼標記，保持 Word 內容乾淨
+                    final_content_for_word = re.sub(r'##### Page \d+ #####\n?', '', final_raw_content)
+                        
+                    if inputWord:
+                        self.log(f"✅ 寫入 Word: {output_name}.docx", mode=mode)
+                        inputWord(final_content_for_word, output_name)
 
-            # 轉 Word
-            if inputWord:
-                self.log(f"✅ 寫入 Word: {pdf_basename}.docx", mode=mode)
-                inputWord(full_text, pdf_basename)
+                # 辨識成功完成後，刪除暫存的 .txt (除非意外暫停或停止)
+                if not self.stop_requested and os.path.exists(txt_name):
+                    try: os.remove(txt_name)
+                    except: pass
             
-            # 清理
-            shutil.rmtree("picture")
-            if os.path.exists(txt_name): os.remove(txt_name)
+            if os.path.exists("picture"): shutil.rmtree("picture")
+            # 不再刪除 txt_name，以便接續與供使用者修改後查看
+            # if os.path.exists(txt_name): os.remove(txt_name)
 
         except Exception as e:
             self.log(f"❌ PDF 處理失敗: {e}", mode=mode)
 
-
-
-# ==========================================
-# 程式進入點 (GUI 模式 - 打包/一般使用)
-# ==========================================
-
-
-# [Image of MVC architecture diagram]
-
 if __name__ == "__main__":
     import customtkinter as ctk
-    from gui import GeminiOCRApp # 引入你的 gui.py
-    
+    from gui import GeminiOCRApp
     root = ctk.CTk()
-    
-    # 1. 啟動 GUI (傳入雙規則)
     app = GeminiOCRApp(root, default_rule_text=RULE, default_explain_rule_text=RULE_EXPLAIN)
-    
-    # 2. 【關鍵】啟動控制器
-    # 這裡就是把「功能」注入到 GUI 的地方
     controller = OCRController(app) 
-    
     root.mainloop()
-
 
 # ==========================================
 # 程式進入點 (CLI 模式 - 開發者除錯)
 # ==========================================
 # 想要跳過 GUI 時，請手動將上方改為 "__main1__"
 elif __name__ == "__main__":
+    from gemini import setup_gemini, gemini_identify
+    from toWord import changeWord, inputWord
     print("--- 進入 CLI / 開發者模式 ---")
     
-    # 模擬環境
     api_key_dict = {} 
-    model = "gemini-3-flash-preview"
+    model = "gemini-1.5-flash"
     
     try:
-        # 1. 初始化
         try:
             setup_gemini(api_key_dict, model, RULE)
         except ValueError:
-            print("注意：未提供 Key，請確保環境變數已設定，否則稍後會出錯。")
+            print("注意：未提供 Key，請確保環境變數已設定。")
 
-        # 2. 掃描檔案
         def extract_page_number(filename):
             match = re.search(r'page_(\d+)', filename)
             return int(match.group(1)) if match else 0
@@ -359,26 +421,17 @@ elif __name__ == "__main__":
         png_files = [f for f in os.listdir('.') if f.lower().endswith('.png')]
         word_files = [f for f in os.listdir('.') if f.lower().endswith(('.docx', '.doc'))]
 
-        # 3. 執行邏輯 (包在 try-except 區塊中)
-        # -------------------------------------------------------------------
-        # 這裡就是修改的重點：捕捉 RuntimeError 來避免印出 Traceback
-        # -------------------------------------------------------------------
-        
-        # Word
         if word_files:
             for file in word_files:
                 if changeWord: changeWord(file)
 
-        # PNG
         if png_files:
             for file in png_files:
                 text = gemini_identify(str(file))
                 with open(f"OUTPUT.txt", "a", encoding="utf-8") as f:
                     f.write(str(text) + "\n\n")
                 print(f"完成 {file}")
-            print("完成 IMG 轉換")
             
-        # PDF
         if pdf_files:
             for file in pdf_files:
                 pdf_name=os.path.splitext(file)[0]
@@ -398,20 +451,8 @@ elif __name__ == "__main__":
                     if inputWord: inputWord(text, pdf_name)
                     print(f"✅ 完成 --- {file}")
 
-        if not (pdf_files or png_files or word_files):
-            print(f"\n{'-'*30}\n這裡甚麼都沒有請再試一次\n{'-'*30}\n")
-
-    except RuntimeError as e:
-        # 當 gemini.py 拋出 "All API Keys exhausted" 時，會進入這裡
-        # 我們只印出乾淨的錯誤訊息，而不印 Stack Trace
-        print(f"\n{'!'*40}")
-        print(f"🛑 程式終止：{e}")
-        print(f"{'!'*40}\n")
-        sys.exit(1)
-        
     except Exception as e:
-        # 其他未預期的錯誤，還是印出來方便除錯
-        print(f"❌ 發生未預期錯誤: {e}")
+        print(f"❌ 發生錯誤: {e}")
         traceback.print_exc()
 
     input("按下Enter鍵結束程式")

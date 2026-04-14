@@ -254,13 +254,13 @@ class AIRefineWindow(ctk.CTkToplevel):
             model = self.app_instance.get_model()
             
             if "gpt" in model.lower():
-                from gpt import setup_gpt, changeRule
-                setup_gpt(keys, model, "", log_callback=None)
+                from gpt import GPTProcessor
+                proc = GPTProcessor(keys, model, "", log_callback=None)
+                new_rule = proc.changeRule(prompt)
             else:
-                from gemini import setup_gemini, changeRule
-                setup_gemini(keys, model, "", log_callback=None)
-
-            new_rule = changeRule(prompt)
+                from gemini import GeminiProcessor
+                proc = GeminiProcessor(keys, model, "", log_callback=None)
+                new_rule = proc.changeRule(prompt)
             if not new_rule: new_rule = "⚠️ API 未回應，請檢查金鑰或重新執行。"
             self.result_text.delete("1.0", "end")
             self.result_text.insert("1.0", new_rule)
@@ -326,9 +326,36 @@ class FileListItem(ctk.CTkFrame):
         
         name_frame = ctk.CTkFrame(self, fg_color="transparent")
         name_frame.pack(fill="x", padx=5, pady=(5, 0))
-        lbl = ctk.CTkLabel(name_frame, text=f"{'📄' if self.is_pdf else '🖼️'} {filename}", anchor="w", font=("微軟正黑體", 12, "bold"))
-        lbl.pack(side="left", fill="x", expand=True)
+        
+        icon = '📄' if self.is_pdf else '🖼️'
+        self.original_filename = filename
+        self.lbl = ctk.CTkLabel(name_frame, text=f"{icon} {filename}", anchor="w", font=("微軟正黑體", 12, "bold"))
+        self.lbl.pack(side="left", fill="x", expand=True)
 
+        if self.is_pdf:
+            # 建立編輯輸出的區域：[輸入框] + [.doc 標籤]
+            stem = os.path.splitext(filename)[0]
+            self.output_name_var = tk.StringVar(value=stem)
+            
+            self.edit_container = ctk.CTkFrame(name_frame, fg_color="transparent")
+            self.output_entry = ctk.CTkEntry(self.edit_container, textvariable=self.output_name_var, height=24, font=("微軟正黑體", 11))
+            self.output_entry.pack(side="left", fill="x", expand=True)
+            self.suffix_label = ctk.CTkLabel(self.edit_container, text=".doc", font=("微軟正黑體", 11))
+            self.suffix_label.pack(side="left", padx=(2, 0))
+            
+            # 綁定進入事件到整個 name_frame
+            name_frame.bind("<Enter>", self._show_entry)
+            self.lbl.bind("<Enter>", self._show_entry)
+            
+            # 綁定離開事件到整個 name_frame
+            name_frame.bind("<Leave>", self._on_mouse_leave_frame)
+            self.edit_container.bind("<Leave>", self._on_mouse_leave_frame)
+            
+            # 綁定焦點事件，確保按下 Enter 或失去焦點時恢復
+            self.output_entry.bind("<FocusOut>", self._show_label)
+            self.output_entry.bind("<Return>", self._show_label)
+            
+        # 初始化控制區 (頁數、移除按鈕)
         ctrl_frame = ctk.CTkFrame(self, fg_color="transparent")
         ctrl_frame.pack(fill="x", padx=5, pady=(2, 5))
 
@@ -359,14 +386,39 @@ class FileListItem(ctk.CTkFrame):
         del_btn = ctk.CTkButton(ctrl_frame, text="❌ 移除", width=50, height=24, fg_color="#FF5555", command=lambda: delete_callback(self.file_path, self))
         del_btn.pack(side="right", padx=2)
 
+    def _show_entry(self, event=None):
+        if self.is_pdf:
+            self.lbl.pack_forget()
+            self.edit_container.pack(side="left", fill="x", expand=True)
+
+    def _show_label(self, event=None):
+        if self.is_pdf:
+            self.edit_container.pack_forget()
+            # 確保 Label 顯示的是原始的 .pdf 檔名
+            self.lbl.configure(text=f"📄 {self.original_filename}")
+            self.lbl.pack(side="left", fill="x", expand=True)
+
+    def _on_mouse_leave_frame(self, event=None):
+        # 只有當目前焦點不在輸入框內時，才恢復 Label
+        focus_w = self.winfo_toplevel().focus_get()
+        if focus_w:
+            # 檢查焦點是否在 output_entry 本身或其子元件（tk.Entry）中
+            if str(focus_w).startswith(str(self.output_entry)):
+                return
+        self._show_label()
+
     def get_individual_settings(self):
-        if self.is_pdf and self.start_page and self.end_page:
-            try: s = int(self.start_page.get()) if self.start_page.get() else None
-            except: s = None
-            try: e = int(self.end_page.get()) if self.end_page.get() else None
-            except: e = None
-            return s, e
-        return None, None
+        settings = {"start": None, "end": None, "output_name": None}
+        if self.is_pdf:
+            if self.start_page and self.end_page:
+                try: settings["start"] = int(self.start_page.get()) if self.start_page.get() else None
+                except: pass
+                try: settings["end"] = int(self.end_page.get()) if self.end_page.get() else None
+                except: pass
+            if hasattr(self, 'output_name_var'):
+                # 結合主檔名與固定後綴
+                settings["output_name"] = self.output_name_var.get() + ".doc"
+        return settings["start"], settings["end"], settings["output_name"]
 
 class GeminiOCRApp:
     def __init__(self, root, default_rule_text="", default_explain_rule_text=""):
@@ -388,6 +440,15 @@ class GeminiOCRApp:
         self.file_items = []
         self.explain_selected_file_paths = []
         self.explain_file_items = []
+
+        # 全域點擊空白處取消焦點
+        self.root.bind("<Button-1>", self._on_bg_click)
+        
+        # 解決某些環境下括號輸入問題 (強迫 TextBox 正常處理輸入)
+        self.root.bind_class("CTkTextbox", "<KeyPress-parenleft>", lambda e: "break" if self._force_char(e, "(") else None)
+        self.root.bind_class("CTkTextbox", "<KeyPress-parenright>", lambda e: "break" if self._force_char(e, ")") else None)
+        self.root.bind_class("CTkEntry", "<KeyPress-parenleft>", lambda e: "break" if self._force_char(e, "(") else None)
+        self.root.bind_class("CTkEntry", "<KeyPress-parenright>", lambda e: "break" if self._force_char(e, ")") else None)
 
         # ==========================================
         # 🔧 全域核心設定
@@ -484,8 +545,12 @@ class GeminiOCRApp:
         self.rule_btn = ctk.CTkButton(ocr_row_rule, text="📝 編輯 OCR 規則", width=120, fg_color="#8A2BE2", command=self.open_rule_window)
         self.rule_btn.pack(side="right", padx=5)
 
-        self.start_btn = ctk.CTkButton(self.action_frame, text="開始執行轉換", font=("微軟正黑體", 16, "bold"), height=50, command=self.on_start_click)
-        self.start_btn.pack(fill="x", pady=5)
+        btn_row = ctk.CTkFrame(self.action_frame, fg_color="transparent")
+        btn_row.pack(fill="x", pady=5)
+        self.start_btn = ctk.CTkButton(btn_row, text="開始進行轉換", font=("微軟正黑體", 16, "bold"), height=50, command=self.on_start_click)
+        self.start_btn.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.stop_btn = ctk.CTkButton(btn_row, text="⏹ 強制停止", font=("微軟正黑體", 16, "bold"), width=120, height=50, fg_color="#D35400", hover_color="#E67E22", state="disabled")
+        self.stop_btn.pack(side="right")
 
         log_header_frame = ctk.CTkFrame(self.action_frame, fg_color="transparent")
         log_header_frame.pack(fill="x", pady=(5, 0))
@@ -545,8 +610,12 @@ class GeminiOCRApp:
         row_rule.pack(fill="x", pady=2)
         ctk.CTkButton(row_rule, text="📝 編輯詳解規則", width=120, fg_color="#8A2BE2", command=self.open_explain_rule_window).pack(side="right", padx=5)
 
-        self.explain_start_btn = ctk.CTkButton(self.explain_action_frame, text="開始執行轉換", font=("微軟正黑體", 16, "bold"), height=50, command=self.on_start_click)
-        self.explain_start_btn.pack(fill="x", pady=5)
+        ex_btn_row = ctk.CTkFrame(self.explain_action_frame, fg_color="transparent")
+        ex_btn_row.pack(fill="x", pady=5)
+        self.explain_start_btn = ctk.CTkButton(ex_btn_row, text="開始進行轉換", font=("微軟正黑體", 16, "bold"), height=50, command=self.on_start_click)
+        self.explain_start_btn.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.explain_stop_btn = ctk.CTkButton(ex_btn_row, text="⏹ 強制停止", font=("微軟正黑體", 16, "bold"), width=120, height=50, fg_color="#D35400", hover_color="#E67E22", state="disabled")
+        self.explain_stop_btn.pack(side="right")
 
         ex_log_header_frame = ctk.CTkFrame(self.explain_action_frame, fg_color="transparent")
         ex_log_header_frame.pack(fill="x", pady=(5, 0))
@@ -634,6 +703,28 @@ class GeminiOCRApp:
                 self.word_log(f"❌ {filename} 發生錯誤: {e}")
         self.word_log("🎉 所有排版任務執行完畢！")
         self.word_start_btn.configure(state="normal", text="🚀 開始執行優化")
+
+    def _on_bg_click(self, event):
+        # 點擊空白處時，嘗試讓目前焦點所在的輸入框失去焦點
+        focus_w = self.root.focus_get()
+        if focus_w:
+            # 如果點擊的目標不是那個輸入框自己，就轉移焦點到 root 上
+            if event.widget != focus_w:
+                self.root.focus()
+
+    def _force_char(self, event, char):
+        # 強制在 Textbox 或 Entry 插入字符，避免被系統捷徑攔截
+        w = event.widget
+        try:
+            if hasattr(w, "insert"):
+                if "textbox" in str(w).lower():
+                    w.insert("insert", char)
+                    return True
+                elif "entry" in str(w).lower():
+                    w.insert("insert", char)
+                    return True
+        except: pass
+        return False
 
     # ========================
     # 邏輯: OCR 頁籤
@@ -725,10 +816,10 @@ class GeminiOCRApp:
         )
         if files:
             for f in files:
-                if f not in self.explain_selected_file_paths:
-                    self.explain_selected_file_paths.append(f)
-                    item = FileListItem(self.explain_file_list_frame, f, self.remove_single_explain_file)
-                    self.explain_file_items.append(item)
+                # 使用者要求相同的檔案可以重複選取，故不再檢查是否已存在
+                self.explain_selected_file_paths.append(f)
+                item = FileListItem(self.explain_file_list_frame, f, self.remove_single_explain_file)
+                self.explain_file_items.append(item)
             self.explain_file_list_frame.configure(label_text=f"已選取 {len(self.explain_selected_file_paths)} 個檔案")
 
     def remove_single_explain_file(self, path, item_widget):
@@ -753,10 +844,10 @@ class GeminiOCRApp:
         )
         if files:
             for f in files:
-                if f not in self.selected_file_paths:
-                    self.selected_file_paths.append(f)
-                    item = FileListItem(self.file_list_frame, f, self.remove_single_file)
-                    self.file_items.append(item)
+                # 使用者要求相同的檔案可以重複選取
+                self.selected_file_paths.append(f)
+                item = FileListItem(self.file_list_frame, f, self.remove_single_file)
+                self.file_items.append(item)
             self.file_list_frame.configure(label_text=f"已選取 {len(self.selected_file_paths)} 個檔案")
 
 
@@ -799,14 +890,18 @@ class GeminiOCRApp:
     def append_output(self, text):
         self.output_text_area.insert('end', text + '\n')
         self.output_text_area.see('end')
-        
+
     def append_explain_output(self, text):
         self.explain_output_text_area.insert('end', text + '\n')
         self.explain_output_text_area.see('end')
 
+    # --- Controller Data Interface ---
+    def get_api_key(self):
+        return self.full_api_key_string or os.environ.get("GEMINI_API_KEY", "")
 
-    def get_api_key(self): return self.full_api_key_string or os.environ.get("GEMINI_API_KEY", "")
-    def get_model(self): return self.model_label.cget("text")
+    def get_model(self):
+        return self.model_label.cget("text")
+
     def get_rule_text(self): 
         base_rule = self.current_rule_text
         if hasattr(self, 'ignore_handwriting_var') and self.ignore_handwriting_var.get():
@@ -816,8 +911,11 @@ class GeminiOCRApp:
     def get_explain_rule_text(self):
         return self.current_explain_rule_text
 
-    def get_selected_files(self): return self.selected_file_paths
-    def get_explain_selected_files(self): return self.explain_selected_file_paths
+    def get_selected_files(self): 
+        return self.selected_file_paths
+
+    def get_explain_selected_files(self): 
+        return self.explain_selected_file_paths
     
     def get_file_settings(self):
         try: gs = int(self.global_start_page.get()) if self.global_start_page.get() else 1
@@ -829,28 +927,32 @@ class GeminiOCRApp:
         for item in self.file_items:
             path = item.file_path
             s, e = gs, ge
+            out_name = None
             if item.is_pdf:
-                indy_s, indy_e = item.get_individual_settings()
+                indy_s, indy_e, indy_out = item.get_individual_settings()
                 if indy_s is not None: s = indy_s
                 if indy_e is not None: e = indy_e
-            settings[path] = {"start": s, "end": e}
+                if indy_out is not None: out_name = indy_out
+            settings[path] = {"start": s, "end": e, "output_name": out_name}
         return settings
 
     def get_explain_file_settings(self):
         try: gs = int(self.explain_global_start_page.get()) if self.explain_global_start_page.get() else 1
         except: gs = 1
-        try: ge = int(self.explain_global_end_page.get()) if self.global_end_page.get() else 0
+        try: ge = int(self.explain_global_end_page.get()) if self.explain_global_end_page.get() else 0
         except: ge = 0
         
         settings = {}
         for item in self.explain_file_items:
             path = item.file_path
             s, e = gs, ge
+            out_name = None
             if item.is_pdf:
-                indy_s, indy_e = item.get_individual_settings()
+                indy_s, indy_e, indy_out = item.get_individual_settings()
                 if indy_s is not None: s = indy_s
                 if indy_e is not None: e = indy_e
-            settings[path] = {"start": s, "end": e}
+                if indy_out is not None: out_name = indy_out
+            settings[path] = {"start": s, "end": e, "output_name": out_name}
         return settings
 
 if __name__ == "__main__":
