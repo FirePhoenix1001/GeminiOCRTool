@@ -323,13 +323,14 @@ class FileListItem(ctk.CTkFrame):
         self.file_path = file_path
         filename = os.path.basename(file_path)
         self.is_pdf = filename.lower().endswith('.pdf')
+        self.processing_mode = False
         
         name_frame = ctk.CTkFrame(self, fg_color="transparent")
         name_frame.pack(fill="x", padx=5, pady=(5, 0))
         
-        icon = '📄' if self.is_pdf else '🖼️'
+        self.icon = '📄' if self.is_pdf else '🖼️'
         self.original_filename = filename
-        self.lbl = ctk.CTkLabel(name_frame, text=f"{icon} {filename}", anchor="w", font=("微軟正黑體", 12, "bold"))
+        self.lbl = ctk.CTkLabel(name_frame, text=f"{self.icon} {filename}", anchor="w", font=("微軟正黑體", 12, "bold"))
         self.lbl.pack(side="left", fill="x", expand=True)
 
         if self.is_pdf:
@@ -349,21 +350,30 @@ class FileListItem(ctk.CTkFrame):
             
             # 綁定離開事件到整個 name_frame
             name_frame.bind("<Leave>", self._on_mouse_leave_frame)
+            self.lbl.bind("<Leave>", self._on_mouse_leave_frame)
             self.edit_container.bind("<Leave>", self._on_mouse_leave_frame)
+
             
             # 綁定焦點事件，確保按下 Enter 或失去焦點時恢復
             self.output_entry.bind("<FocusOut>", self._show_label)
             self.output_entry.bind("<Return>", self._show_label)
+        else:
+            # 即便不是 PDF，也綁定 Enter/Leave 以支援處理模式切換
+            name_frame.bind("<Enter>", self._show_entry)
+            self.lbl.bind("<Enter>", self._show_entry)
+            name_frame.bind("<Leave>", self._on_mouse_leave_frame)
+            self.lbl.bind("<Leave>", self._on_mouse_leave_frame)
+
             
         # 初始化控制區 (頁數、移除按鈕)
-        ctrl_frame = ctk.CTkFrame(self, fg_color="transparent")
-        ctrl_frame.pack(fill="x", padx=5, pady=(2, 5))
+        self.ctrl_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.ctrl_frame.pack(fill="x", padx=5, pady=(2, 5))
 
         self.start_page = None
         self.end_page = None
 
         if self.is_pdf:
-            page_frame = ctk.CTkFrame(ctrl_frame, fg_color="transparent")
+            page_frame = ctk.CTkFrame(self.ctrl_frame, fg_color="transparent")
             page_frame.pack(side="left")
             ctk.CTkLabel(page_frame, text="頁數:").pack(side="left", padx=2)
             self.start_page_entry = ctk.CTkEntry(page_frame, width=35, height=24, placeholder_text="1")
@@ -383,29 +393,59 @@ class FileListItem(ctk.CTkFrame):
             self.start_page = self.start_page_entry
             self.end_page = self.end_page_entry
 
-        del_btn = ctk.CTkButton(ctrl_frame, text="❌ 移除", width=50, height=24, fg_color="#FF5555", command=lambda: delete_callback(self.file_path, self))
+        del_btn = ctk.CTkButton(self.ctrl_frame, text="❌ 移除", width=50, height=24, fg_color="#FF5555", command=lambda: delete_callback(self.file_path, self))
         del_btn.pack(side="right", padx=2)
 
     def _show_entry(self, event=None):
-        if self.is_pdf:
-            self.lbl.pack_forget()
-            self.edit_container.pack(side="left", fill="x", expand=True)
+        if self.processing_mode:
+            # 處理模式下且滑鼠移入：顯示原始檔名
+            self.lbl.configure(text=f"{self.icon} {self.original_filename}")
+            if self.is_pdf: self.edit_container.pack_forget()
+            self.lbl.pack(side="left", fill="x", expand=True)
+        else:
+            if self.is_pdf:
+                self.lbl.pack_forget()
+                self.edit_container.pack(side="left", fill="x", expand=True)
 
     def _show_label(self, event=None):
-        if self.is_pdf:
-            self.edit_container.pack_forget()
-            # 確保 Label 顯示的是原始的 .pdf 檔名
-            self.lbl.configure(text=f"📄 {self.original_filename}")
+        if self.processing_mode:
+            # 處理模式下：如果不是移入狀態，顯示 .doc 名稱
+            if self.is_pdf and hasattr(self, 'output_name_var'):
+                out_name = self.output_name_var.get()
+            else:
+                out_name = os.path.splitext(self.original_filename)[0]
+            self.lbl.configure(text=f"{self.icon} {out_name}.doc")
+            if self.is_pdf: self.edit_container.pack_forget()
             self.lbl.pack(side="left", fill="x", expand=True)
+        else:
+            if self.is_pdf:
+                self.edit_container.pack_forget()
+                # 確保 Label 顯示的是原始的檔名
+                self.lbl.configure(text=f"{self.icon} {self.original_filename}")
+                self.lbl.pack(side="left", fill="x", expand=True)
 
     def _on_mouse_leave_frame(self, event=None):
-        # 只有當目前焦點不在輸入框內時，才恢復 Label
-        focus_w = self.winfo_toplevel().focus_get()
-        if focus_w:
-            # 檢查焦點是否在 output_entry 本身或其子元件（tk.Entry）中
-            if str(focus_w).startswith(str(self.output_entry)):
-                return
+        if self.is_pdf and not self.processing_mode:
+            # 只有當目前焦點不在輸入框內時，才恢復 Label
+            focus_w = self.winfo_toplevel().focus_get()
+            if focus_w:
+                # 檢查焦點是否在 output_entry 本身或其子元件（tk.Entry）中
+                if str(focus_w).startswith(str(self.output_entry)):
+                    return
         self._show_label()
+
+    def set_processing_mode(self, enabled):
+        self.processing_mode = enabled
+        if enabled:
+            if hasattr(self, 'ctrl_frame'):
+                self.ctrl_frame.pack_forget()
+            self._show_label() # 切換到顯示 .doc
+        else:
+            if hasattr(self, 'ctrl_frame'):
+                self.ctrl_frame.pack(fill="x", padx=5, pady=(2, 5))
+            self._show_label() # 切換回顯示原本檔名
+
+
 
     def get_individual_settings(self):
         settings = {"start": None, "end": None, "output_name": None}
@@ -954,6 +994,12 @@ class GeminiOCRApp:
                 if indy_out is not None: out_name = indy_out
             settings[path] = {"start": s, "end": e, "output_name": out_name}
         return settings
+
+    def set_all_items_processing_mode(self, enabled, mode="ocr"):
+        items = self.file_items if mode == "ocr" else self.explain_file_items
+        for item in items:
+            item.set_processing_mode(enabled)
+
 
 if __name__ == "__main__":
     dummy_rule = "這是測試用的預設規則。\n1. 請保持原意\n2. 不要亂改"

@@ -183,9 +183,12 @@ class OCRController:
         if mode == "ocr":
             self.app.start_btn.configure(state="disabled", text="⏳ 處理中...")
             self.app.stop_btn.configure(state="normal")
+            self.app.set_all_items_processing_mode(True, mode="ocr")
         else:
             self.app.explain_start_btn.configure(state="disabled", text="⏳ 處理中...")
             self.app.explain_stop_btn.configure(state="normal")
+            self.app.set_all_items_processing_mode(True, mode="explain")
+
         
         threading.Thread(target=self.run_process, args=(mode,), daemon=True).start()
 
@@ -247,9 +250,12 @@ class OCRController:
             if mode == "ocr":
                 self.app.start_btn.configure(state="normal", text="開始進行轉換")
                 self.app.stop_btn.configure(state="disabled")
+                self.app.set_all_items_processing_mode(False, mode="ocr")
             else:
                 self.app.explain_start_btn.configure(state="normal", text="開始進行轉換")
                 self.app.explain_stop_btn.configure(state="disabled")
+                self.app.set_all_items_processing_mode(False, mode="explain")
+
 
     def process_image(self, file_path, filename, identify_func, mode="ocr", output_name=None):
         try:
