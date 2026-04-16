@@ -325,12 +325,12 @@ class FileListItem(ctk.CTkFrame):
         self.is_pdf = filename.lower().endswith('.pdf')
         self.processing_mode = False
         
-        name_frame = ctk.CTkFrame(self, fg_color="transparent")
-        name_frame.pack(fill="x", padx=5, pady=(5, 0))
+        self.name_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.name_frame.pack(fill="x", padx=5, pady=(5, 0))
         
         self.icon = '📄' if self.is_pdf else '🖼️'
         self.original_filename = filename
-        self.lbl = ctk.CTkLabel(name_frame, text=f"{self.icon} {filename}", anchor="w", font=("微軟正黑體", 12, "bold"))
+        self.lbl = ctk.CTkLabel(self.name_frame, text=f"{self.icon} {filename}", anchor="w", font=("微軟正黑體", 12, "bold"))
         self.lbl.pack(side="left", fill="x", expand=True)
 
         if self.is_pdf:
@@ -338,30 +338,29 @@ class FileListItem(ctk.CTkFrame):
             stem = os.path.splitext(filename)[0]
             self.output_name_var = tk.StringVar(value=stem)
             
-            self.edit_container = ctk.CTkFrame(name_frame, fg_color="transparent")
+            self.edit_container = ctk.CTkFrame(self.name_frame, fg_color="transparent")
             self.output_entry = ctk.CTkEntry(self.edit_container, textvariable=self.output_name_var, height=24, font=("微軟正黑體", 11))
             self.output_entry.pack(side="left", fill="x", expand=True)
             self.suffix_label = ctk.CTkLabel(self.edit_container, text=".doc", font=("微軟正黑體", 11))
             self.suffix_label.pack(side="left", padx=(2, 0))
             
-            # 綁定進入事件到整個 name_frame
-            name_frame.bind("<Enter>", self._show_entry)
+            # 綁定進入事件到整個 name_frame 與子元件，確保 hover 被捕捉
+            self.name_frame.bind("<Enter>", self._show_entry)
             self.lbl.bind("<Enter>", self._show_entry)
             
-            # 綁定離開事件到整個 name_frame
-            name_frame.bind("<Leave>", self._on_mouse_leave_frame)
+            # 綁定離開事件，配合 _on_mouse_leave_frame 的座標檢查來防止閃爍
+            self.name_frame.bind("<Leave>", self._on_mouse_leave_frame)
             self.lbl.bind("<Leave>", self._on_mouse_leave_frame)
             self.edit_container.bind("<Leave>", self._on_mouse_leave_frame)
-
             
             # 綁定焦點事件，確保按下 Enter 或失去焦點時恢復
             self.output_entry.bind("<FocusOut>", self._show_label)
             self.output_entry.bind("<Return>", self._show_label)
         else:
             # 即便不是 PDF，也綁定 Enter/Leave 以支援處理模式切換
-            name_frame.bind("<Enter>", self._show_entry)
+            self.name_frame.bind("<Enter>", self._show_entry)
             self.lbl.bind("<Enter>", self._show_entry)
-            name_frame.bind("<Leave>", self._on_mouse_leave_frame)
+            self.name_frame.bind("<Leave>", self._on_mouse_leave_frame)
             self.lbl.bind("<Leave>", self._on_mouse_leave_frame)
 
             
@@ -425,6 +424,23 @@ class FileListItem(ctk.CTkFrame):
                 self.lbl.pack(side="left", fill="x", expand=True)
 
     def _on_mouse_leave_frame(self, event=None):
+        if event:
+            try:
+                # 取得目前滑鼠相對於螢幕的座標
+                mx, my = self.name_frame.winfo_pointerxy()
+                # 取得 name_frame 的絕對座標與範圍
+                rx = self.name_frame.winfo_rootx()
+                ry = self.name_frame.winfo_rooty()
+                rw = self.name_frame.winfo_width()
+                rh = self.name_frame.winfo_height()
+                
+                # 如果滑鼠其實還在 name_frame 的矩形區域內（包含所有子元件），則忽略 Leave 事件
+                # 這樣可以避免 Label 內容變動（導致寬度縮小）時觸發假的 Leave
+                if rx <= mx < rx + rw and ry <= my < ry + rh:
+                    return
+            except:
+                pass
+
         if self.is_pdf and not self.processing_mode:
             # 只有當目前焦點不在輸入框內時，才恢復 Label
             focus_w = self.winfo_toplevel().focus_get()
