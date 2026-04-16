@@ -408,13 +408,16 @@ class FileListItem(ctk.CTkFrame):
 
     def _show_label(self, event=None):
         if self.processing_mode:
-            # 處理模式下：如果不是移入狀態，顯示 .doc 名稱
-            if self.is_pdf and hasattr(self, 'output_name_var'):
-                out_name = self.output_name_var.get()
+            # 處理模式下：如果不是移入狀態，顯示輸出的檔案名稱 (僅 PDF 會有輸出的 .doc)
+            if self.is_pdf:
+                if hasattr(self, 'output_name_var'):
+                    out_name = self.output_name_var.get()
+                else:
+                    out_name = os.path.splitext(self.original_filename)[0]
+                self.lbl.configure(text=f"{self.icon} {out_name}.doc")
+                self.edit_container.pack_forget()
             else:
-                out_name = os.path.splitext(self.original_filename)[0]
-            self.lbl.configure(text=f"{self.icon} {out_name}.doc")
-            if self.is_pdf: self.edit_container.pack_forget()
+                self.lbl.configure(text=f"{self.icon} {self.original_filename}")
             self.lbl.pack(side="left", fill="x", expand=True)
         else:
             if self.is_pdf:

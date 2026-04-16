@@ -259,31 +259,7 @@ class OCRController:
 
     def process_image(self, file_path, filename, identify_func, mode="ocr", output_name=None):
         try:
-            # 如果 output_name 沒給，預設就是 base_name
-            if not output_name:
-                output_name = base_name
-            else:
-                # 去除可能帶有的 .doc 或 .docx 後綴
-                if output_name.lower().endswith(".docx"): output_name = output_name[:-5]
-                if output_name.lower().endswith(".doc"): output_name = output_name[:-4]
-
-            # 暫存檔名改為以自定義名稱為主
-            txt_name = f"{output_name}.txt"
-            
-            # 檢查是否已經處理過且有內容 (雖然單張圖片通常不接續，但為了邏輯統一)
-            existing_text = ""
-            if os.path.exists(txt_name):
-                with open(txt_name, "r", encoding="utf-8") as f:
-                    existing_text = f.read().strip()
-            
-            if existing_text:
-                self.log(f"ℹ️ {filename} 已有現存辨識內容，將直接使用現有內容。", mode=mode)
-                result_text = existing_text
-            else:
-                result_text = identify_func(file_path)
-                if result_text:
-                    with open(txt_name, "w", encoding="utf-8") as f:
-                        f.write(result_text)
+            result_text = identify_func(file_path)
             
             if result_text:
                 if mode == "ocr":
@@ -291,20 +267,7 @@ class OCRController:
                 else:
                     self.app.append_explain_output(f"--- {filename} ---\n{result_text}\n")
                 
-                # 圖片也支援轉 Word (如果使用者需要)
-                if inputWord:
-                    # 重新從文字文件讀取內容 (以文字文件為準)
-                    with open(txt_name, "r", encoding="utf-8") as f:
-                        final_text = f.read()
-                    self.log(f"✅ 寫入 Word: {output_name}.docx", mode=mode)
-                    inputWord(final_text, output_name)
-                    
                 self.log(f"✅ {filename} 處理完成", mode=mode)
-                
-                # 辨識成功完成後，刪除暫存的 .txt (除非意外暫停或停止，目前是非 stop 狀態)
-                if not self.stop_requested and os.path.exists(txt_name):
-                    try: os.remove(txt_name)
-                    except: pass
             else:
                 self.log(f"⚠️ {filename} 結果為空", mode=mode)
         except Exception as e:
