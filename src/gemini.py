@@ -72,9 +72,10 @@ class GeminiProcessor:
         self._init_client_with_current_key()
 
     def log_msg(self, msg: str):
-        print(msg) 
         if self.gui_log:
             self.gui_log(msg)
+        else:
+            print(msg)
 
     def _init_client_with_current_key(self):
         if not self.current_key_name: return
@@ -84,6 +85,18 @@ class GeminiProcessor:
             self.log_msg(f"🔑 初始化成功，目前使用【{self.current_key_name}】")
         except Exception as e:
             self.log_msg(f"❌ Client 初始化失敗 ({self.current_key_name})")
+
+    def _get_response_text(self, response) -> str:
+        """安全地提取 Gemini 回應的文字，避免思維模型（Thinking Model）輸出 thought_signature 警告"""
+        try:
+            if response and response.candidates and response.candidates[0].content.parts:
+                return "".join(part.text for part in response.candidates[0].content.parts if part.text)
+        except Exception:
+            pass
+        try:
+            return response.text if response else ""
+        except Exception:
+            return ""
 
     def rotate_key(self) -> bool:
         all_keys = list(self.api_key_dict.keys())
@@ -120,10 +133,11 @@ class GeminiProcessor:
             return ""
         while True:
             try:
-                return self.client.models.generate_content(
+                response = self.client.models.generate_content(
                     model=self.model,
                     contents=[prompt]
-                ).text
+                )
+                return self._get_response_text(response)
             except errors.ClientError as e:
                 err_msg = str(e)
                 should_rotate = any(keyword in err_msg for keyword in ROTATE_TRIGGER_KEYWORDS)
@@ -155,13 +169,14 @@ class GeminiProcessor:
 
         while True:
             try:
-                return self.client.models.generate_content(
+                response = self.client.models.generate_content(
                     model=self.model,
                     contents=[
                         types.Part.from_bytes(data=image_bytes, mime_type='image/png'),
                         self.rule
                     ]
-                ).text
+                )
+                return self._get_response_text(response)
             except errors.ClientError as e:
                 err_msg = str(e)
                 should_rotate = any(keyword in err_msg for keyword in ROTATE_TRIGGER_KEYWORDS)

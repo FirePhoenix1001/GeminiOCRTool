@@ -6,6 +6,11 @@ import subprocess
 import winreg
 import threading
 from toWord import changeWord
+try:
+    from drag_drop import hook_dropfiles
+except ImportError:
+    hook_dropfiles = None
+
 
 # ==========================================
 # 自定義元件區
@@ -480,7 +485,7 @@ class FileListItem(ctk.CTkFrame):
         return settings["start"], settings["end"], settings["output_name"]
 
 class GeminiOCRApp:
-    def __init__(self, root, default_rule_text="", default_explain_rule_text=""):
+    def __init__(self, root, default_rule_text="", default_explain_rule_text="", default_model="gemini-3-flash-preview"):
         self.root = root
         self.default_rule_text = default_rule_text
         self.current_rule_text = default_rule_text
@@ -488,7 +493,7 @@ class GeminiOCRApp:
         self.current_explain_rule_text = default_explain_rule_text
         
         self.root.title("Gemini OCR & 詳解自動化工具")
-        self.root.geometry("700x750")
+        self.root.geometry("700x700")
         
         ctk.set_appearance_mode("System")
         ctk.set_default_color_theme("blue")
@@ -536,7 +541,7 @@ class GeminiOCRApp:
         bottom_row.pack(fill="x", padx=10, pady=2)
 
         ctk.CTkLabel(bottom_row, text="當前模型: ", font=("微軟正黑體", 14, "bold")).pack(side="left", padx=5)
-        self.model_label = ctk.CTkLabel(bottom_row, text="gemini-3-flash-preview", text_color="#2CC985", font=("微軟正黑體", 14))
+        self.model_label = ctk.CTkLabel(bottom_row, text=default_model, text_color="#2CC985", font=("微軟正黑體", 14))
         self.model_label.pack(side="left", padx=5)
         
         self.ignore_handwriting_var = ctk.BooleanVar(value=False)
@@ -559,7 +564,6 @@ class GeminiOCRApp:
 
         # OCR 工作區
         self.middle_container = ctk.CTkFrame(self.tab_ocr, fg_color="transparent")
-        self.middle_container.pack(fill="both", expand=True, padx=10, pady=5)
 
         # OCR: 左側上傳區
         self.upload_frame = ctk.CTkFrame(self.middle_container, corner_radius=10, width=400)
@@ -595,9 +599,12 @@ class GeminiOCRApp:
         self.output_text_area = ctk.CTkTextbox(self.output_frame, font=("微軟正黑體", 14), wrap="word")
         self.output_text_area.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
-        # OCR: 執行區
+        # OCR: 執行區 (設定 side="bottom" 優先配置，確保視窗高度不夠時優先完整顯示)
         self.action_frame = ctk.CTkFrame(self.tab_ocr, fg_color="transparent")
-        self.action_frame.pack(fill="x", padx=10, pady=5)
+        self.action_frame.pack(side="bottom", fill="x", padx=10, pady=5)
+
+        # OCR 工作區 (再使用 side="top" 填充剩下空間，使其自適應大小)
+        self.middle_container.pack(side="top", fill="both", expand=True, padx=10, pady=5)
 
         ocr_row_rule = ctk.CTkFrame(self.action_frame, fg_color="transparent")
         ocr_row_rule.pack(fill="x", pady=2)
@@ -606,9 +613,9 @@ class GeminiOCRApp:
 
         btn_row = ctk.CTkFrame(self.action_frame, fg_color="transparent")
         btn_row.pack(fill="x", pady=5)
-        self.start_btn = ctk.CTkButton(btn_row, text="開始進行轉換", font=("微軟正黑體", 16, "bold"), height=50, command=self.on_start_click)
+        self.start_btn = ctk.CTkButton(btn_row, text="開始進行轉換", font=("微軟正黑體", 16, "bold"), height=45, command=self.on_start_click)
         self.start_btn.pack(side="left", fill="x", expand=True, padx=(0, 5))
-        self.stop_btn = ctk.CTkButton(btn_row, text="⏹ 強制停止", font=("微軟正黑體", 16, "bold"), width=120, height=50, fg_color="#D35400", hover_color="#E67E22", state="disabled")
+        self.stop_btn = ctk.CTkButton(btn_row, text="⏹ 強制停止", font=("微軟正黑體", 16, "bold"), width=120, height=45, fg_color="#D35400", hover_color="#E67E22", state="disabled")
         self.stop_btn.pack(side="right")
 
         log_header_frame = ctk.CTkFrame(self.action_frame, fg_color="transparent")
@@ -617,7 +624,7 @@ class GeminiOCRApp:
         ctk.CTkLabel(log_header_frame, text="執行日誌:", font=("微軟正黑體", 12)).pack(side="left")
         ctk.CTkButton(log_header_frame, text="🗑️ 清空日誌", width=80, height=24, fg_color="#555555", command=self.clear_log).pack(side="right")
 
-        self.log_area = ctk.CTkTextbox(self.action_frame, height=100, state="disabled", font=("微軟正黑體", 12))
+        self.log_area = ctk.CTkTextbox(self.action_frame, height=80, state="disabled", font=("微軟正黑體", 12))
         self.log_area.pack(fill="x", pady=(0, 5))
 
         # ==========================================
@@ -625,7 +632,6 @@ class GeminiOCRApp:
         # ==========================================
         # 詳解 工作區
         self.explain_middle_container = ctk.CTkFrame(self.tab_explain, fg_color="transparent")
-        self.explain_middle_container.pack(fill="both", expand=True, padx=10, pady=5)
 
         # 詳解: 左側上傳區
         self.explain_upload_frame = ctk.CTkFrame(self.explain_middle_container, corner_radius=10, width=400)
@@ -661,9 +667,12 @@ class GeminiOCRApp:
         self.explain_output_text_area = ctk.CTkTextbox(self.explain_output_frame, font=("微軟正黑體", 14), wrap="word")
         self.explain_output_text_area.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
-        # 詳解: 執行區
+        # 詳解: 執行區 (設定 side="bottom" 優先配置，確保視窗高度不夠時優先完整顯示)
         self.explain_action_frame = ctk.CTkFrame(self.tab_explain, fg_color="transparent")
-        self.explain_action_frame.pack(fill="x", padx=10, pady=5)
+        self.explain_action_frame.pack(side="bottom", fill="x", padx=10, pady=5)
+
+        # 詳解 工作區 (再使用 side="top" 填充剩下空間，使其自適應大小)
+        self.explain_middle_container.pack(side="top", fill="both", expand=True, padx=10, pady=5)
 
         row_rule = ctk.CTkFrame(self.explain_action_frame, fg_color="transparent")
         row_rule.pack(fill="x", pady=2)
@@ -671,9 +680,9 @@ class GeminiOCRApp:
 
         ex_btn_row = ctk.CTkFrame(self.explain_action_frame, fg_color="transparent")
         ex_btn_row.pack(fill="x", pady=5)
-        self.explain_start_btn = ctk.CTkButton(ex_btn_row, text="開始進行轉換", font=("微軟正黑體", 16, "bold"), height=50, command=self.on_start_click)
+        self.explain_start_btn = ctk.CTkButton(ex_btn_row, text="開始進行轉換", font=("微軟正黑體", 16, "bold"), height=45, command=self.on_start_click)
         self.explain_start_btn.pack(side="left", fill="x", expand=True, padx=(0, 5))
-        self.explain_stop_btn = ctk.CTkButton(ex_btn_row, text="⏹ 強制停止", font=("微軟正黑體", 16, "bold"), width=120, height=50, fg_color="#D35400", hover_color="#E67E22", state="disabled")
+        self.explain_stop_btn = ctk.CTkButton(ex_btn_row, text="⏹ 強制停止", font=("微軟正黑體", 16, "bold"), width=120, height=45, fg_color="#D35400", hover_color="#E67E22", state="disabled")
         self.explain_stop_btn.pack(side="right")
 
         ex_log_header_frame = ctk.CTkFrame(self.explain_action_frame, fg_color="transparent")
@@ -682,7 +691,7 @@ class GeminiOCRApp:
         ctk.CTkLabel(ex_log_header_frame, text="執行日誌:", font=("微軟正黑體", 12)).pack(side="left")
         ctk.CTkButton(ex_log_header_frame, text="🗑️ 清空日誌", width=80, height=24, fg_color="#555555", command=self.clear_explain_log).pack(side="right")
 
-        self.explain_log_area = ctk.CTkTextbox(self.explain_action_frame, height=100, state="disabled", font=("微軟正黑體", 12))
+        self.explain_log_area = ctk.CTkTextbox(self.explain_action_frame, height=80, state="disabled", font=("微軟正黑體", 12))
         self.explain_log_area.pack(fill="x", pady=(0, 5))
 
         # ==========================================
@@ -692,29 +701,61 @@ class GeminiOCRApp:
         self.word_selected_files = []
         
         title_frame = ctk.CTkFrame(self.tab_word, fg_color="transparent")
-        title_frame.pack(fill="x", pady=(20, 10))
+        title_frame.pack(side="top", fill="x", pady=(15, 5))
         ctk.CTkLabel(title_frame, text="📄 Word 文件排版優化器", font=("微軟正黑體", 20, "bold")).pack()
         ctk.CTkLabel(title_frame, text="將文件中文字型轉標楷體，英文數字符號轉 Times New Roman。\n並自動進行數學減號校正與特定英文字母斜體排版。", font=("微軟正黑體", 12), text_color="gray").pack(pady=(5, 0))
         
+        # 優化選項區
+        opt_frame = ctk.CTkFrame(self.tab_word, corner_radius=10)
+        opt_frame.pack(side="top", fill="x", padx=30, pady=5)
+        
+        ctk.CTkLabel(opt_frame, text="⚙️ 優化選項設定", font=("微軟正黑體", 14, "bold")).pack(anchor="w", padx=15, pady=(8, 2))
+        
+        cb_grid = ctk.CTkFrame(opt_frame, fg_color="transparent")
+        cb_grid.pack(fill="x", padx=15, pady=(2, 8))
+        
+        self.opt_minus_to_hyphen = ctk.BooleanVar(value=False)
+        self.opt_hyphen_to_minus = ctk.BooleanVar(value=True) # 預設維持原本的減號校正 (- 轉 −)
+        self.opt_convert_super = ctk.BooleanVar(value=False)
+        self.opt_convert_sub = ctk.BooleanVar(value=False)
+        
+        cb1 = ctk.CTkCheckBox(cb_grid, text="減號轉換： − 轉 - (Unicode 減號轉 ASCII 減號)", variable=self.opt_minus_to_hyphen, font=("微軟正黑體", 12), command=self._on_minus_to_hyphen_changed)
+        cb1.pack(anchor="w", pady=4)
+        
+        cb2 = ctk.CTkCheckBox(cb_grid, text="減號轉換： - 轉 − (ASCII 減號轉 Unicode 減號，預設)", variable=self.opt_hyphen_to_minus, font=("微軟正黑體", 12), command=self._on_hyphen_to_minus_changed)
+        cb2.pack(anchor="w", pady=4)
+        
+        cb3 = ctk.CTkCheckBox(cb_grid, text="上標轉換： 將 ^{內容} 轉為 Word 上標格式並移除括號", variable=self.opt_convert_super, font=("微軟正黑體", 12))
+        cb3.pack(anchor="w", pady=4)
+        
+        cb4 = ctk.CTkCheckBox(cb_grid, text="下標轉換： 將 _{內容} 轉為 Word 下標格式並移除括號", variable=self.opt_convert_sub, font=("微軟正黑體", 12))
+        cb4.pack(anchor="w", pady=4)
+
         self.word_list_frame = ctk.CTkScrollableFrame(self.tab_word, label_text="已選取 0 個 Word 檔案")
-        self.word_list_frame.pack(fill="both", expand=True, padx=30, pady=10)
         
         word_btn_frame = ctk.CTkFrame(self.tab_word, fg_color="transparent")
-        word_btn_frame.pack(fill="x", padx=30, pady=5)
         
         ctk.CTkButton(word_btn_frame, text="➕ 選擇檔案", width=120, command=self.select_word_files).pack(side="left")
         ctk.CTkButton(word_btn_frame, text="🗑️ 清空列表", width=100, fg_color="#FF5555", command=self.clear_word_files).pack(side="right")
         
-        self.word_start_btn = ctk.CTkButton(self.tab_word, text="🚀 開始執行優化", font=("微軟正黑體", 16, "bold"), height=50, command=self.on_word_start)
-        self.word_start_btn.pack(fill="x", padx=30, pady=(15, 5))
+        self.word_start_btn = ctk.CTkButton(self.tab_word, text="🚀 開始執行優化", font=("微軟正黑體", 16, "bold"), height=45, command=self.on_word_start)
         
-        self.word_log_area = ctk.CTkTextbox(self.tab_word, height=120, state="disabled", font=("微軟正黑體", 12))
-        self.word_log_area.pack(fill="x", padx=30, pady=(5, 10))
+        self.word_log_area = ctk.CTkTextbox(self.tab_word, height=80, state="disabled", font=("微軟正黑體", 12))
+        
+        # 依底層優先順序進行 pack，確保自適應與防止被裁切
+        self.word_log_area.pack(side="bottom", fill="x", padx=30, pady=(5, 10))
+        self.word_start_btn.pack(side="bottom", fill="x", padx=30, pady=(10, 5))
+        word_btn_frame.pack(side="bottom", fill="x", padx=30, pady=5)
+        self.word_list_frame.pack(side="top", fill="both", expand=True, padx=30, pady=5)
+
+        # 初始化拖曳檔案功能
+        self.root.after(100, self.setup_drag_drop)
 
     # ========================
     # 邏輯: Word 頁籤
     # ========================
     def word_log(self, message):
+        print(message)
         self.word_log_area.configure(state="normal")
         self.word_log_area.insert("end", message + "\n")
         self.word_log_area.see("end")
@@ -726,10 +767,7 @@ class GeminiOCRApp:
             filetypes=[("Word 檔案", "*.docx;*.doc")]
         )
         if files:
-            for f in files:
-                if f not in self.word_selected_files:
-                    self.word_selected_files.append(f)
-            self.update_word_list()
+            self.add_word_files(files)
 
     def clear_word_files(self):
         self.word_selected_files = []
@@ -750,13 +788,33 @@ class GeminiOCRApp:
         self.word_start_btn.configure(state="disabled", text="⏳ 正在處理中...")
         threading.Thread(target=self.process_word_files, daemon=True).start()
 
+    def _on_minus_to_hyphen_changed(self):
+        if self.opt_minus_to_hyphen.get():
+            self.opt_hyphen_to_minus.set(False)
+
+    def _on_hyphen_to_minus_changed(self):
+        if self.opt_hyphen_to_minus.get():
+            self.opt_minus_to_hyphen.set(False)
+
     def process_word_files(self):
         self.word_log(f"--- 🚀 開始處理 {len(self.word_selected_files)} 個檔案 ---")
+        
+        opt_m_to_h = self.opt_minus_to_hyphen.get()
+        opt_h_to_m = self.opt_hyphen_to_minus.get()
+        opt_super = self.opt_convert_super.get()
+        opt_sub = self.opt_convert_sub.get()
+        
         for file in self.word_selected_files:
             filename = os.path.basename(file)
             self.word_log(f"🔄 正在處理: {filename} ...")
             try:
-                changeWord(file)
+                changeWord(
+                    file, 
+                    convert_minus_to_hyphen=opt_m_to_h, 
+                    convert_hyphen_to_minus=opt_h_to_m, 
+                    convert_super=opt_super, 
+                    convert_sub=opt_sub
+                )
                 self.word_log(f"✅ {filename} 處理完成！")
             except Exception as e:
                 self.word_log(f"❌ {filename} 發生錯誤: {e}")
@@ -852,6 +910,7 @@ class GeminiOCRApp:
         self.explain_log("✅ 詳解規則已保存。")
 
     def explain_log(self, message):
+        print(message)
         self.explain_log_area.configure(state="normal")
         self.explain_log_area.insert("end", message + "\n")
         self.explain_log_area.see("end")
@@ -874,12 +933,7 @@ class GeminiOCRApp:
             filetypes=[("圖片與 PDF", "*.png;*.jpg;*.jpeg;*.pdf"), ("所有檔案", "*.*")]
         )
         if files:
-            for f in files:
-                # 使用者要求相同的檔案可以重複選取，故不再檢查是否已存在
-                self.explain_selected_file_paths.append(f)
-                item = FileListItem(self.explain_file_list_frame, f, self.remove_single_explain_file)
-                self.explain_file_items.append(item)
-            self.explain_file_list_frame.configure(label_text=f"已選取 {len(self.explain_selected_file_paths)} 個檔案")
+            self.add_explain_files(files)
 
     def remove_single_explain_file(self, path, item_widget):
         if path in self.explain_selected_file_paths:
@@ -902,12 +956,72 @@ class GeminiOCRApp:
             filetypes=[("圖片與 PDF", "*.png;*.jpg;*.jpeg;*.pdf"), ("所有檔案", "*.*")]
         )
         if files:
-            for f in files:
-                # 使用者要求相同的檔案可以重複選取
+            self.add_ocr_files(files)
+
+    # ========================
+    # 邏輯: 拖曳檔案支援 (Drag & Drop)
+    # ========================
+    def setup_drag_drop(self):
+        if not hook_dropfiles:
+            return
+        try:
+            hwnd = self.root.winfo_id()
+            if hook_dropfiles(hwnd, self.on_window_drop):
+                self.log("✨ 拖曳檔案功能已啟用，您可以直接將檔案拖曳至視窗中！")
+        except Exception as e:
+            print(f"拖曳檔案功能初始化失敗: {e}")
+
+    def on_window_drop(self, files):
+        if not files:
+            return
+        current_tab = self.tabview.get()
+        if "OCR" in current_tab:
+            self.add_ocr_files(files)
+        elif "詳解" in current_tab:
+            self.add_explain_files(files)
+        elif "Word" in current_tab:
+            self.add_word_files(files)
+
+    def add_ocr_files(self, files):
+        valid_exts = {".png", ".jpg", ".jpeg", ".pdf"}
+        added_count = 0
+        for f in files:
+            ext = os.path.splitext(f)[1].lower()
+            if ext in valid_exts:
                 self.selected_file_paths.append(f)
                 item = FileListItem(self.file_list_frame, f, self.remove_single_file)
                 self.file_items.append(item)
+                added_count += 1
+        if added_count > 0:
             self.file_list_frame.configure(label_text=f"已選取 {len(self.selected_file_paths)} 個檔案")
+            self.log(f"📥 拖曳新增了 {added_count} 個 OCR 檔案")
+
+    def add_explain_files(self, files):
+        valid_exts = {".png", ".jpg", ".jpeg", ".pdf"}
+        added_count = 0
+        for f in files:
+            ext = os.path.splitext(f)[1].lower()
+            if ext in valid_exts:
+                self.explain_selected_file_paths.append(f)
+                item = FileListItem(self.explain_file_list_frame, f, self.remove_single_explain_file)
+                self.explain_file_items.append(item)
+                added_count += 1
+        if added_count > 0:
+            self.explain_file_list_frame.configure(label_text=f"已選取 {len(self.explain_selected_file_paths)} 個檔案")
+            self.explain_log(f"📥 拖曳新增了 {added_count} 個詳解檔案")
+
+    def add_word_files(self, files):
+        valid_exts = {".docx", ".doc"}
+        added_count = 0
+        for f in files:
+            ext = os.path.splitext(f)[1].lower()
+            if ext in valid_exts:
+                if f not in self.word_selected_files:
+                    self.word_selected_files.append(f)
+                    added_count += 1
+        if added_count > 0:
+            self.update_word_list()
+            self.word_log(f"📥 拖曳新增了 {added_count} 個 Word 檔案")
 
 
     def remove_single_file(self, path, item_widget):
@@ -941,6 +1055,7 @@ class GeminiOCRApp:
 
 
     def log(self, message):
+        print(message)
         self.log_area.configure(state="normal")
         self.log_area.insert("end", message + "\n")
         self.log_area.see("end")

@@ -70,9 +70,10 @@ class GPTProcessor:
         self._init_client_with_current_key()
 
     def log_msg(self, msg: str):
-        print(msg) 
         if self.gui_log:
             self.gui_log(msg)
+        else:
+            print(msg)
 
     def _init_client_with_current_key(self):
         if not self.current_key_name: return
