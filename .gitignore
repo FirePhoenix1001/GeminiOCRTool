@@ -1,19 +1,30 @@
-# --- 1. 忽略虛擬環境與系統檔 (最重要) ---
-Lib/
-Scripts/
-share/
-Include/
-pyvenv.cfg
-__pycache__/
-*.py[cod]
+# Dependency directories (never push this to git)
+node_modules/
 
-# --- 2. 忽略打包產生的垃圾 ---
-build/
+# Production build directory (we only push the copied index.html to the root)
 dist/
 
-# --- 3. 忽略執行檔 (避免檔案過大) ---
-*.exe
+# Local environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
-# --- 4. 忽略開發工具設定 ---
+# Log files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor and IDE directories
 .vscode/
 .idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS metadata
+.DS_Store
+Thumbs.db

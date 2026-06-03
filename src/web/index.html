@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini OCR & 詳解自動化工具</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&family=Inter:wght@300;400;600;800&family=Outfit:wght@300;400;600;800&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="./css/style.css">
+    
+    <!-- PDF.js CDN Library (Requires external worker thread) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+</head>
+
+<body class="theme-dark">
+    <div class="app-layout">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="brand-area">
+                <div class="logo-area"><i class="fa-solid fa-brain"></i></div>
+                <div class="brand-text">
+                    <h2>GeminiOCR <span id="api-status-badge" class="status-badge bad" title="尚未設定 API 金鑰">🔴 OFF</span></h2>
+                </div>
+            </div>
+
+            <!-- Navigation Tabs -->
+            <nav class="nav-tabs">
+                <button class="nav-tab active" data-tab="tab-ocr">
+                    <i class="fa-solid fa-magnifying-glass"></i> 🔍 OCR 辨識
+                </button>
+                <button class="nav-tab" data-tab="tab-explain">
+                    <i class="fa-solid fa-lightbulb"></i> 💡 生成詳解
+                </button>
+                <button class="nav-tab" data-tab="tab-word">
+                    <i class="fa-solid fa-file-word"></i> 📄 Word 排版優化
+                </button>
+                <button class="nav-tab" data-tab="tab-settings">
+                    <i class="fa-solid fa-sliders"></i> ⚙️ 金鑰與模型設定
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <button id="theme-toggle-btn" class="theme-toggle-btn" title="切換深淺色模式">
+                    <i class="fa-solid fa-moon"></i> <span>深色模式</span>
+                </button>
+                <button id="open-local-files-btn" class="workspace-btn" style="display:none;">
+                    <i class="fa-solid fa-folder-open"></i> 開啟本機檔案 (DEV)
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Workspace Area -->
+        <main class="main-content">
+            <!-- Global Connection Indicator Banner (Unused in pure frontend, but shown if helpful) -->
+            <div id="status-alert-banner" class="status-alert-banner hide">
+                <div class="banner-content">
+                    <span class="banner-icon"><i class="fa-solid fa-triangle-exclamation"></i></span>
+                    <div class="banner-text">
+                        <h3 id="banner-message">請至「金鑰與模型設定」填寫 API Key 以開始使用！</h3>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab Content Panes -->
+            <div class="tab-contents">
+
+                <!-- 1. OCR Tab -->
+                <div id="tab-ocr" class="tab-pane active">
+                    <div class="split-workspace">
+                        <!-- Left Panel: File list and settings -->
+                        <div class="left-panel">
+                            <div class="pane-header-row">
+                                <h2>🔍 OCR 辨識 (圖片 / PDF)</h2>
+                            </div>
+                            
+                            <!-- Dropzone -->
+                            <div class="drop-zone" id="ocr-drop-zone">
+                                <i class="fa-solid fa-cloud-arrow-up drop-icon"></i>
+                                <p>將 PDF 或圖片拖曳到此處，或<span>點擊選取檔案</span></p>
+                                <input type="file" id="ocr-file-input" multiple accept="image/*,.pdf" style="display: none;">
+                            </div>
+
+                            <!-- Selected files list -->
+                            <div class="files-card">
+                                <div class="card-header">
+                                    <h3>📁 待處理檔案列表 (<span id="ocr-file-count">0</span>)</h3>
+                                    <button class="small-btn btn-danger" id="ocr-clear-files-btn"><i class="fa-solid fa-trash-can"></i> 清空</button>
+                                </div>
+                                <div class="file-list-scroll scrollbar" id="ocr-file-list">
+                                    <div class="empty-list-text">尚未選取 any 檔案...</div>
+                                </div>
+                            </div>
+
+                            <!-- Page Ranges and controls -->
+                            <div class="controls-card">
+                                <div class="input-row">
+                                    <div class="input-group">
+                                        <label for="ocr-global-start">PDF 全體開始頁碼</label>
+                                        <input type="number" id="ocr-global-start" min="1" placeholder="1">
+                                    </div>
+                                    <div class="input-group">
+                                        <label for="ocr-global-end">PDF 全體結束頁碼</label>
+                                        <input type="number" id="ocr-global-end" min="1" placeholder="全部">
+                                    </div>
+                                </div>
+                                <div class="btn-actions-row">
+                                    <button id="ocr-edit-rule-btn" class="action-btn btn-purple"><i class="fa-solid fa-pen-to-square"></i> 編輯 OCR 規則</button>
+                                    <div class="main-run-buttons">
+                                        <button id="ocr-start-btn" class="action-btn btn-blue"><i class="fa-solid fa-play"></i> 開始進行轉換</button>
+                                        <button id="ocr-stop-btn" class="action-btn btn-orange hide" disabled><i class="fa-solid fa-stop"></i> 強制停止</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Right Panel: Live output view -->
+                        <div class="right-panel">
+                            <div class="pane-header-row">
+                                <h2>📄 即時編輯與輸出 (OUTPUT)</h2>
+                                <button class="small-btn btn-outline" id="ocr-copy-output-btn"><i class="fa-solid fa-copy"></i> 複製全部</button>
+                            </div>
+                            <div class="textarea-container">
+                                <textarea id="ocr-output-area" class="scrollbar" placeholder="轉換後的 OCR 結果會即時呈現於此，您可以直接編輯修改..."></textarea>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. Explain Tab -->
+                <div id="tab-explain" class="tab-pane">
+                    <div class="split-workspace">
+                        <!-- Left Panel: File list and settings -->
+                        <div class="left-panel">
+                            <div class="pane-header-row">
+                                <h2>💡 生成數學詳解 (圖片 / PDF)</h2>
+                            </div>
+                            
+                            <!-- Dropzone -->
+                            <div class="drop-zone" id="explain-drop-zone">
+                                <i class="fa-solid fa-cloud-arrow-up drop-icon"></i>
+                                <p>將 PDF 或圖片拖曳到此處，或<span>點擊選取檔案</span></p>
+                                <input type="file" id="explain-file-input" multiple accept="image/*,.pdf" style="display: none;">
+                            </div>
+
+                            <!-- Selected files list -->
+                            <div class="files-card">
+                                <div class="card-header">
+                                    <h3>📁 待處理檔案列表 (<span id="explain-file-count">0</span>)</h3>
+                                    <button class="small-btn btn-danger" id="explain-clear-files-btn"><i class="fa-solid fa-trash-can"></i> 清空</button>
+                                </div>
+                                <div class="file-list-scroll scrollbar" id="explain-file-list">
+                                    <div class="empty-list-text">尚未選取任何檔案...</div>
+                                </div>
+                            </div>
+
+                            <!-- Page Ranges and controls -->
+                            <div class="controls-card">
+                                <div class="input-row">
+                                    <div class="input-group">
+                                        <label for="explain-global-start">PDF 全體開始頁碼</label>
+                                        <input type="number" id="explain-global-start" min="1" placeholder="1">
+                                    </div>
+                                    <div class="input-group">
+                                        <label for="explain-global-end">PDF 全體結束頁碼</label>
+                                        <input type="number" id="explain-global-end" min="1" placeholder="全部">
+                                    </div>
+                                </div>
+                                <div class="btn-actions-row">
+                                    <button id="explain-edit-rule-btn" class="action-btn btn-purple"><i class="fa-solid fa-pen-to-square"></i> 編輯詳解規則</button>
+                                    <div class="main-run-buttons">
+                                        <button id="explain-start-btn" class="action-btn btn-blue"><i class="fa-solid fa-play"></i> 開始進行轉換</button>
+                                        <button id="explain-stop-btn" class="action-btn btn-orange hide" disabled><i class="fa-solid fa-stop"></i> 強制停止</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Right Panel: Live output view -->
+                        <div class="right-panel">
+                            <div class="pane-header-row">
+                                <h2>📄 詳解生成 (OUTPUT)</h2>
+                                <button class="small-btn btn-outline" id="explain-copy-output-btn"><i class="fa-solid fa-copy"></i> 複製全部</button>
+                            </div>
+                            <div class="textarea-container">
+                                <textarea id="explain-output-area" class="scrollbar" placeholder="生成的詳解結果會呈現在此，您可以直接編輯修改..."></textarea>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. Word Refinement Tab -->
+                <div id="tab-word" class="tab-pane">
+                    <div class="pane-header">
+                        <h2>📄 Word 排版優化器</h2>
+                        <p class="pane-subtitle">修正字型（中文字型轉標楷體、英文數字符號轉 Times New Roman）、數學減號校正與上下標特定排版。</p>
+                    </div>
+
+                    <div class="form-container">
+                        <div class="options-card">
+                            <h3>⚙️ 優化選項設定</h3>
+                            <div class="checkbox-grid">
+                                <label class="custom-checkbox-row">
+                                    <input type="checkbox" id="word-minus-to-hyphen">
+                                    <span class="checkbox-box"></span>
+                                    <span class="checkbox-label">減號轉換： − 轉 - (Unicode 減號轉 ASCII 減號)</span>
+                                </label>
+                                <label class="custom-checkbox-row">
+                                    <input type="checkbox" id="word-hyphen-to-minus" checked>
+                                    <span class="checkbox-box"></span>
+                                    <span class="checkbox-label">減號轉換： - 轉 − (ASCII 減號轉 Unicode 減號，預設推薦)</span>
+                                </label>
+                                <label class="custom-checkbox-row">
+                                    <input type="checkbox" id="word-convert-super">
+                                    <span class="checkbox-box"></span>
+                                    <span class="checkbox-label">上標轉換： 將 ^{內容} 轉為 Word 格式上標並移除括號</span>
+                                </label>
+                                <label class="custom-checkbox-row">
+                                    <input type="checkbox" id="word-convert-sub">
+                                    <span class="checkbox-box"></span>
+                                    <span class="checkbox-label">下標轉換： 將 _{內容} 轉為 Word 格式下標並移除括號</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Dropzone for docx -->
+                        <div class="drop-zone" id="word-drop-zone">
+                            <i class="fa-solid fa-file-word drop-icon" style="color: #2196f3;"></i>
+                            <p>將現有的 .docx 檔案拖曳到此處，或<span>點擊選取檔案</span></p>
+                            <input type="file" id="word-file-input" multiple accept=".docx" style="display: none;">
+                        </div>
+
+                        <!-- Selected files list -->
+                        <div class="files-card no-margin">
+                            <div class="card-header">
+                                <h3>📁 待優化 Word 檔案列表 (<span id="word-file-count">0</span>)</h3>
+                                <button class="small-btn btn-danger" id="word-clear-files-btn"><i class="fa-solid fa-trash-can"></i> 清空列表</button>
+                            </div>
+                            <div class="file-list-scroll scrollbar" id="word-file-list" style="max-height: 200px;">
+                                <div class="empty-list-text">尚未選取任何 Word 檔案...</div>
+                            </div>
+                        </div>
+
+                        <button id="word-start-btn" class="action-btn btn-blue" style="margin-top: 15px; width: 100%;">
+                            <i class="fa-solid fa-rocket"></i> 開始執行優化
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 4. Settings Tab -->
+                <div id="tab-settings" class="tab-pane">
+                    <div class="pane-header">
+                        <h2>⚙️ 金鑰與模型設定 (API & Model Settings)</h2>
+                        <p class="pane-subtitle">在此處輸入您的金鑰與設定模型，所有設定將存在瀏覽器本機的 localStorage 中。</p>
+                    </div>
+
+                    <div class="form-container">
+                        <!-- Key Config -->
+                        <div class="config-card">
+                            <h3>🔑 API 金鑰配置</h3>
+                            <div class="input-group">
+                                <label for="gemini-api-key">Gemini API Key (優先度 1)</label>
+                                <div class="password-input-wrapper">
+                                    <input type="password" id="gemini-api-key" placeholder="請貼上您的 Google Gemini API Key">
+                                    <button class="toggle-password-btn" type="button"><i class="fa-solid fa-eye"></i></button>
+                                </div>
+                            </div>
+                            <div class="input-group">
+                                <label for="openai-api-key">OpenAI API Key (備用金鑰)</label>
+                                <div class="password-input-wrapper">
+                                    <input type="password" id="openai-api-key" placeholder="請貼上您的 OpenAI API Key">
+                                    <button class="toggle-password-btn" type="button"><i class="fa-solid fa-eye"></i></button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Multi Keys Advanced -->
+                        <div class="config-card">
+                            <div class="card-header-row">
+                                <h3>⚙️ 進階：多組 API Key 輪替管理 (適用大量轉換，防 429 限流)</h3>
+                                <label class="custom-switch">
+                                    <input type="checkbox" id="use-multi-keys">
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+                            <div id="multi-keys-container" class="hide">
+                                <p class="card-description">請每行輸入一組金鑰，格式為 <code>金鑰名稱:金鑰內容</code> 或直接輸入 <code>金鑰內容</code>：</p>
+                                <textarea id="multi-keys-text" class="scrollbar" style="height: 120px; font-family: 'Fira Code', monospace; font-size: 13px;" placeholder="Key_1:AIzaSy...\nKey_2:AIzaSy...\nOpenAI_Key:sk-..."></textarea>
+                            </div>
+                        </div>
+
+                        <!-- Model Selection -->
+                        <div class="config-card">
+                            <h3>🤖 模型與行為設定</h3>
+                            <div class="form-row">
+                                <div class="input-group half">
+                                    <label for="model-select">核心推理模型 (Model)</label>
+                                    <select id="model-select">
+                                        <option value="gemini-2.5-flash" selected>Gemini 2.5 Flash (極速/推薦)</option>
+                                        <option value="gemini-2.5-pro">Gemini 2.5 Pro (高精準/適合難題)</option>
+                                        <option value="gemini-1.5-flash">Gemini 1.5 Flash (舊版 Flash)</option>
+                                        <option value="gemini-1.5-pro">Gemini 1.5 Pro (舊版 Pro)</option>
+                                        <option value="gpt-4o-mini">GPT-4o Mini (快速/低成本)</option>
+                                        <option value="gpt-4o">GPT-4o (OpenAI 旗艦模型)</option>
+                                        <option value="custom">自定義模型名稱...</option>
+                                    </select>
+                                </div>
+                                <div class="input-group half" id="custom-model-wrapper" style="display: none;">
+                                    <label for="custom-model-name">自定義模型名稱</label>
+                                    <input type="text" id="custom-model-name" placeholder="例如 gemini-2.5-flash-8b">
+                                </div>
+                            </div>
+                            <div class="checkbox-grid" style="margin-top: 15px;">
+                                <label class="custom-checkbox-row">
+                                    <input type="checkbox" id="settings-ignore-handwriting">
+                                    <span class="checkbox-box"></span>
+                                    <span class="checkbox-label">忽略工作區域手寫字體 (排除手寫批改，專注於印刷體公式)</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <button id="save-settings-btn" class="action-btn btn-blue" style="width: 100%;">
+                            <i class="fa-solid fa-floppy-disk"></i> 儲存金鑰與設定
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Sticky Progress HUD (Active during processing) -->
+            <div id="progress-container" class="progress-container hide">
+                <div class="progress-details">
+                    <span id="progress-task-name"><i class="fa-solid fa-spinner fa-spin"></i> 正在執行任務...</span>
+                    <span id="progress-percentage">0%</span>
+                </div>
+                <div class="progress-bar-bg">
+                    <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <!-- Terminal System Console -->
+            <footer class="system-logs-panel">
+                <div class="logs-header">
+                    <h3><i class="fa-solid fa-terminal"></i> 系統即時日誌 (Console Logs)</h3>
+                    <button id="clear-logs-btn" class="clear-btn" title="清除日誌">
+                        <i class="fa-solid fa-trash-can"></i> 清空日誌
+                    </button>
+                </div>
+                <div id="terminal-console" class="terminal-console scrollbar">
+                    <div class="log-line system-line">[SYSTEM] 瀏覽器純前端 JavaScript OCR 引擎已就緒。🌻</div>
+                </div>
+            </footer>
+        </main>
+    </div>
+
+    <!-- Rule Edit Modal -->
+    <div id="rule-modal" class="modal">
+        <div class="modal-content">
+            <span class="modal-close" id="rule-modal-close">&times;</span>
+            <h3 id="rule-modal-title">📝 編輯規則 (Prompt)</h3>
+            <div class="modal-body">
+                <textarea id="rule-modal-textarea" class="scrollbar" style="width: 100%; height: 260px; font-size: 14px; font-family: sans-serif; line-height: 1.5;"></textarea>
+                <div class="modal-actions">
+                    <button id="rule-modal-reset-btn" class="action-btn btn-gray"><i class="fa-solid fa-arrow-rotate-left"></i> 重置預設</button>
+                    <button id="rule-modal-ai-btn" class="action-btn btn-purple"><i class="fa-solid fa-wand-magic-sparkles"></i> AI 優化規則 (Prompt Tuning)</button>
+                    <button id="rule-modal-save-btn" class="action-btn btn-blue"><i class="fa-solid fa-circle-check"></i> 儲存並關閉</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Refine Modal -->
+    <div id="ai-refine-modal" class="modal">
+        <div class="modal-content" style="max-width: 750px;">
+            <span class="modal-close" id="ai-refine-modal-close">&times;</span>
+            <h3>✨ AI 規則優化 (Prompt Tuning)</h3>
+            <div class="modal-body">
+                <div class="refine-grid">
+                    <div class="refine-left">
+                        <div class="input-group">
+                            <label for="refine-bad-output">😔 AI 原本錯誤的輸出:</label>
+                            <textarea id="refine-bad-output" class="scrollbar" placeholder="貼上 AI 辨識錯的結果 (例如: $x$ 變成了 $\times$)"></textarea>
+                        </div>
+                        <div class="input-group" style="margin-top: 10px;">
+                            <label for="refine-good-output">✅ 您期望的理想輸出:</label>
+                            <textarea id="refine-good-output" class="scrollbar" placeholder="貼上您希望的正確排版結果"></textarea>
+                        </div>
+                    </div>
+                    <div class="refine-right">
+                        <div class="input-group">
+                            <label for="refine-result-output">💡 AI 精煉計算出的新規則:</label>
+                            <textarea id="refine-result-output" class="scrollbar" readonly placeholder="精煉後的規則將會輸出在這裡..."></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-actions" style="margin-top: 15px;">
+                    <button id="refine-generate-btn" class="action-btn btn-purple" style="width: 150px;"><i class="fa-solid fa-wand-magic"></i> 產生新規則</button>
+                    <button id="refine-apply-btn" class="action-btn btn-blue"><i class="fa-solid fa-circle-check"></i> 複製並套用</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main JavaScript Controller (ES Module) -->
+    <script type="module" src="./js/app.js"></script>
+</body>
+
+</html>
