@@ -118,7 +118,16 @@ export async function callAIApi(promptRule, inputType, base64Image = null) {
             return result;
         } else {
             const errStr = (lastError.message || '').toLowerCase();
-            const triggersRotation = errStr.includes('429') || errStr.includes('resource_exhausted') || errStr.includes('limit') || errStr.includes('key') || errStr.includes('quota');
+            const triggersRotation = errStr.includes('429') || 
+                                     errStr.includes('resource_exhausted') || 
+                                     errStr.includes('limit') || 
+                                     errStr.includes('key') || 
+                                     errStr.includes('quota') ||
+                                     errStr.includes('demand') ||
+                                     errStr.includes('overloaded') ||
+                                     errStr.includes('temporary') ||
+                                     errStr.includes('busy') ||
+                                     errStr.includes('try again');
             
             if (triggersRotation && keys.length > 1) {
                 logMsg(`⚠️ 金鑰【${currentKeyInfo.name}】連線超額且重試失敗: ${lastError.message}`, 'error');
