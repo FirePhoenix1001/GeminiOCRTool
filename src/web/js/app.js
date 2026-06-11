@@ -430,6 +430,10 @@ document.addEventListener('DOMContentLoaded', () => {
         customModelNameInput.value = localStorage.getItem('custom-model') || '';
         settingsIgnoreHandwriting.checked = localStorage.getItem('ignore-handwriting') === 'true';
 
+        settingsIgnoreHandwriting.addEventListener('change', () => {
+            localStorage.setItem('ignore-handwriting', settingsIgnoreHandwriting.checked);
+        });
+
         modelSelect.dispatchEvent(new Event('change'));
         updateApiKeyStatus();
     }
@@ -477,6 +481,70 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     loadSettings();
+
+    // Global Stepper buttons event bindings
+    document.querySelectorAll('.input-group .stepper-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const targetId = btn.dataset.target;
+            const input = document.getElementById(targetId);
+            if (!input) return;
+
+            const isPlus = btn.classList.contains('plus');
+            let currentVal = parseInt(input.value);
+            
+            const otherId = targetId.endsWith('start') 
+                ? targetId.replace('start', 'end') 
+                : targetId.replace('end', 'start');
+            const otherInput = document.getElementById(otherId);
+            const otherVal = otherInput ? parseInt(otherInput.value) : NaN;
+
+            if (targetId.endsWith('start')) {
+                if (isNaN(currentVal)) currentVal = 1;
+                let newVal = isPlus ? currentVal + 1 : currentVal - 1;
+                newVal = Math.max(1, newVal);
+                if (!isNaN(otherVal)) {
+                    newVal = Math.min(newVal, otherVal);
+                }
+                input.value = newVal;
+            } else { // end page
+                if (isNaN(currentVal)) {
+                    const startVal = otherInput ? (parseInt(otherInput.value) || 1) : 1;
+                    currentVal = startVal;
+                }
+                let newVal = isPlus ? currentVal + 1 : currentVal - 1;
+                const startVal = otherInput ? (parseInt(otherInput.value) || 1) : 1;
+                newVal = Math.max(startVal, newVal);
+                input.value = newVal;
+            }
+            
+            input.dispatchEvent(new Event('change'));
+        });
+    });
+
+    // Global inputs manual change sanitization
+    ['ocr-global-start', 'ocr-global-end', 'explain-global-start', 'explain-global-end'].forEach(id => {
+        const input = document.getElementById(id);
+        if (!input) return;
+        input.addEventListener('change', () => {
+            let val = parseInt(input.value);
+            if (isNaN(val)) return; // Allow empty value ("全部")
+
+            const otherId = id.endsWith('start') ? id.replace('start', 'end') : id.replace('end', 'start');
+            const otherInput = document.getElementById(otherId);
+            const otherVal = otherInput ? parseInt(otherInput.value) : NaN;
+
+            if (id.endsWith('start')) {
+                val = Math.max(1, val);
+                if (!isNaN(otherVal)) {
+                    val = Math.min(val, otherVal);
+                }
+            } else {
+                const startVal = otherInput ? (parseInt(otherInput.value) || 1) : 1;
+                val = Math.max(startVal, val);
+            }
+            input.value = val;
+        });
+    });
 
     /* ==========================================
        4. File List & Dropzone Binding
@@ -585,9 +653,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 pageSelectorHtml = `
                     <div class="page-range-input">
                         <span>頁數:</span>
-                        <input type="number" value="${item.startPage}" min="1" max="${item.maxPages}" data-field="startPage" data-id="${item.id}">
+                        <div class="stepper">
+                            <button class="stepper-btn minus" data-field="startPage" data-id="${item.id}" type="button" tabindex="-1">-</button>
+                            <input type="number" value="${item.startPage}" min="1" max="${item.maxPages}" data-field="startPage" data-id="${item.id}">
+                            <button class="stepper-btn plus" data-field="startPage" data-id="${item.id}" type="button" tabindex="-1">+</button>
+                        </div>
                         <span>-</span>
-                        <input type="number" value="${item.endPage || item.maxPages}" min="1" max="${item.maxPages}" data-field="endPage" placeholder="${item.maxPages}" data-id="${item.id}">
+                        <div class="stepper">
+                            <button class="stepper-btn minus" data-field="endPage" data-id="${item.id}" type="button" tabindex="-1">-</button>
+                            <input type="number" value="${item.endPage || item.maxPages}" min="1" max="${item.maxPages}" data-field="endPage" placeholder="${item.maxPages}" data-id="${item.id}">
+                            <button class="stepper-btn plus" data-field="endPage" data-id="${item.id}" type="button" tabindex="-1">+</button>
+                        </div>
                     </div>
                 `;
             }
@@ -628,12 +704,54 @@ document.addEventListener('DOMContentLoaded', () => {
                     const targetItem = filesArray.find(f => f.id === id);
                     if (targetItem) {
                         if (field === 'startPage') {
-                            targetItem.startPage = parseInt(e.target.value) || 1;
+                            let val = parseInt(e.target.value);
+                            if (isNaN(val)) val = 1;
+                            const endVal = targetItem.endPage || targetItem.maxPages;
+                            val = Math.max(1, Math.min(val, endVal));
+                            targetItem.startPage = val;
+                            e.target.value = val;
                         } else if (field === 'endPage') {
-                            targetItem.endPage = parseInt(e.target.value) || targetItem.maxPages;
+                            let val = parseInt(e.target.value);
+                            if (isNaN(val)) val = targetItem.maxPages;
+                            const startVal = targetItem.startPage || 1;
+                            val = Math.max(startVal, Math.min(val, targetItem.maxPages));
+                            targetItem.endPage = val;
+                            e.target.value = val;
                         } else if (field === 'outputName') {
                             targetItem.outputName = e.target.value.trim();
                         }
+                    }
+                });
+            });
+
+            // Stepper buttons event bindings
+            fileRow.querySelectorAll('.stepper-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const field = btn.dataset.field;
+                    const id = btn.dataset.id;
+                    const targetItem = filesArray.find(f => f.id === id);
+                    if (!targetItem) return;
+
+                    const input = fileRow.querySelector(`input[data-field="${field}"][data-id="${id}"]`);
+                    if (!input) return;
+
+                    const isPlus = btn.classList.contains('plus');
+                    let currentVal = parseInt(input.value);
+
+                    if (field === 'startPage') {
+                        if (isNaN(currentVal)) currentVal = 1;
+                        let newVal = isPlus ? currentVal + 1 : currentVal - 1;
+                        const endVal = targetItem.endPage || targetItem.maxPages;
+                        newVal = Math.max(1, Math.min(newVal, endVal));
+                        targetItem.startPage = newVal;
+                        input.value = newVal;
+                    } else if (field === 'endPage') {
+                        if (isNaN(currentVal)) currentVal = targetItem.maxPages;
+                        let newVal = isPlus ? currentVal + 1 : currentVal - 1;
+                        const startVal = targetItem.startPage || 1;
+                        newVal = Math.max(startVal, Math.min(newVal, targetItem.maxPages));
+                        targetItem.endPage = newVal;
+                        input.value = newVal;
                     }
                 });
             });
@@ -836,7 +954,10 @@ ${oldRule}
         logMsg(`[SYSTEM] 🚀 開始處理 ${totalFiles} 個任務 (${type === 'ocr' ? 'OCR 辨識' : '詳解生成'})...`);
 
         try {
-            const rulePrompt = getRule(type);
+            let rulePrompt = getRule(type);
+            if (type === 'ocr' && settingsIgnoreHandwriting.checked) {
+                rulePrompt += "\n\n【特別指示：請完全忽略圖片中的任何手寫字體（例如手寫筆記、紅色批改筆跡、手寫公式等），僅轉錄圖片中的印刷體文字與印刷體公式。】";
+            }
 
             for (let i = 0; i < totalFiles; i++) {
                 if (stopRequested) break;

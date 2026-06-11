@@ -4,7 +4,7 @@
   "description": "Gemini OCR & Explainer Tool",
   "type": "module",
   "scripts": {
-    "dev": "vite --root src/web",
+    "dev": "vite",
     "build": "vite build && node copy-build.js"
   },
   "dependencies": {
