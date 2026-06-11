@@ -92,6 +92,8 @@ export async function callAIApi(promptRule, inputType, base64Image = null) {
             } catch (err) {
                 lastError = err;
                 const errStr = (err.message || '').toLowerCase();
+                const isHighDemand = errStr.includes('high demand') || errStr.includes('spikes in demand');
+                
                 // Detect retryable errors (Busy servers, rate limits, overloads)
                 const isRetryable = errStr.includes('429') || 
                                     errStr.includes('resource_exhausted') || 
@@ -100,14 +102,45 @@ export async function callAIApi(promptRule, inputType, base64Image = null) {
                                     errStr.includes('try again') || 
                                     errStr.includes('temporary') || 
                                     errStr.includes('busy') ||
-                                    errStr.includes('limit');
+                                    errStr.includes('limit') ||
+                                    errStr.includes('quota');
 
-                if (isRetryable && retryCount < maxRetries) {
-                    retryCount++;
-                    const delay = baseDelay * Math.pow(2, retryCount - 1) + Math.random() * 1000;
-                    logMsg(`⚠️ [限流重試] 伺服器忙碌或限制: ${err.message}`);
-                    logMsg(`⏱️ 啟用指數型退避等待，將於 ${(delay / 1000).toFixed(1)} 秒後進行第 ${retryCount} 次重試...`);
-                    await sleep(delay);
+                if (isRetryable) {
+                    // Check if message specifies a retry duration (e.g. Please retry in 21.255346312s or 49.936108ms)
+                    const retryMatch = /Please retry in (\d+(?:\.\d+)?)(ms|s)/i.exec(err.message);
+                    if (retryMatch) {
+                        const val = parseFloat(retryMatch[1]);
+                        const unit = retryMatch[2].toLowerCase();
+                        const parsedSeconds = unit === 'ms' ? val / 1000 : val;
+                        const waitTime = parsedSeconds + 5;
+
+                        if (waitTime > 20 && keys.length > 1) {
+                            logMsg(`⚠️ [限流重試] 偵測到超額限制，預估需等待 ${waitTime.toFixed(1)} 秒 (超過 20 秒)。直接切換 API 金鑰...`);
+                            break; // Break the retry loop to trigger key rotation
+                        } else {
+                            if (retryCount < maxRetries) {
+                                retryCount++;
+                                logMsg(`⚠️ [限流重試] 偵測到超額限制，預估需等待 ${waitTime.toFixed(1)} 秒 (小於等於 20 秒)。`);
+                                logMsg(`⏱️ 依指示等待 ${waitTime.toFixed(1)} 秒後進行第 ${retryCount} 次重試...`);
+                                await sleep(waitTime * 1000);
+                                continue;
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+
+                    // High demand or other retryable errors
+                    const currentMaxRetries = isHighDemand ? 5 : maxRetries; // Retry up to 5 times for high demand
+                    if (retryCount < currentMaxRetries) {
+                        retryCount++;
+                        const delay = baseDelay * Math.pow(2, retryCount - 1) + Math.random() * 1000;
+                        logMsg(`⚠️ [限流重試] 伺服器忙碌或限制: ${err.message}`);
+                        logMsg(`⏱️ 啟用指數型退避等待，將於 ${(delay / 1000).toFixed(1)} 秒後進行第 ${retryCount} 次重試...`);
+                        await sleep(delay);
+                    } else {
+                        break;
+                    }
                 } else {
                     break;
                 }
