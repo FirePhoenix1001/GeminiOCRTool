@@ -140,16 +140,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const progressBarFill = document.getElementById('progress-bar-fill');
 
     // Settings elements
-    const geminiApiKeyInput = document.getElementById('gemini-api-key');
-    const openaiApiKeyInput = document.getElementById('openai-api-key');
-    const useMultiKeysInput = document.getElementById('use-multi-keys');
-    const multiKeysContainer = document.getElementById('multi-keys-container');
-    const multiKeysTextInput = document.getElementById('multi-keys-text');
+    const keysListContainer = document.getElementById('keys-list-container');
+    const addKeyBtn = document.getElementById('add-key-btn');
     const modelSelect = document.getElementById('model-select');
     const customModelWrapper = document.getElementById('custom-model-wrapper');
     const customModelNameInput = document.getElementById('custom-model-name');
     const settingsIgnoreHandwriting = document.getElementById('settings-ignore-handwriting');
     const saveSettingsBtn = document.getElementById('save-settings-btn');
+
+    let currentApiKeys = [];
 
     // Modal elements
     const ruleModal = document.getElementById('rule-modal');
@@ -313,36 +312,128 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    useMultiKeysInput.addEventListener('change', () => {
-        if (useMultiKeysInput.checked) {
-            multiKeysContainer.classList.remove('hide');
-        } else {
-            multiKeysContainer.classList.add('hide');
+    // Dynamic Keys Rendering Function
+    function renderKeysList() {
+        keysListContainer.innerHTML = '';
+        if (currentApiKeys.length === 0) {
+            keysListContainer.innerHTML = '<div class="empty-list-text" style="padding: 10px 0;">目前無設定任何金鑰，請點擊新增按鈕</div>';
+            return;
         }
+
+        currentApiKeys.forEach((item, index) => {
+            const row = document.createElement('div');
+            row.className = 'key-row';
+            row.dataset.index = index;
+
+            row.innerHTML = `
+                <select class="key-type-select">
+                    <option value="gemini" ${item.type === 'gemini' ? 'selected' : ''}>Gemini</option>
+                    <option value="openai" ${item.type === 'openai' ? 'selected' : ''}>OpenAI</option>
+                </select>
+                <div class="password-input-wrapper">
+                    <input type="password" class="key-value-input" value="${item.key}" placeholder="請輸入 API Key">
+                    <button class="toggle-password-btn" type="button"><i class="fa-solid fa-eye"></i></button>
+                </div>
+                <button type="button" class="delete-key-row-btn" title="刪除金鑰"><i class="fa-solid fa-trash-can"></i></button>
+            `;
+
+            // Bind change on type select
+            row.querySelector('.key-type-select').addEventListener('change', (e) => {
+                currentApiKeys[index].type = e.target.value;
+            });
+
+            // Bind input on key value
+            row.querySelector('.key-value-input').addEventListener('input', (e) => {
+                currentApiKeys[index].key = e.target.value.trim();
+            });
+
+            // Bind toggle visibility
+            row.querySelector('.toggle-password-btn').addEventListener('click', () => {
+                const input = row.querySelector('.key-value-input');
+                const icon = row.querySelector('.toggle-password-btn i');
+                if (input.type === 'password') {
+                    input.type = 'text';
+                    icon.className = 'fa-solid fa-eye-slash';
+                } else {
+                    input.type = 'password';
+                    icon.className = 'fa-solid fa-eye';
+                }
+            });
+
+            // Bind delete row
+            row.querySelector('.delete-key-row-btn').addEventListener('click', () => {
+                currentApiKeys.splice(index, 1);
+                renderKeysList();
+            });
+
+            keysListContainer.appendChild(row);
+        });
+    }
+
+    addKeyBtn.addEventListener('click', () => {
+        currentApiKeys.push({ type: 'gemini', key: '' });
+        renderKeysList();
     });
 
     function loadSettings() {
-        geminiApiKeyInput.value = localStorage.getItem('gemini-key') || '';
-        openaiApiKeyInput.value = localStorage.getItem('openai-key') || '';
-        useMultiKeysInput.checked = localStorage.getItem('use-multi') === 'true';
-        multiKeysTextInput.value = localStorage.getItem('multi-keys') || '';
-        modelSelect.value = localStorage.getItem('model-name') || 'gemini-2.5-flash';
+        // Load API Keys from geminiocr-api-keys
+        let savedKeys = [];
+        try {
+            const keysStr = localStorage.getItem('geminiocr-api-keys');
+            if (keysStr) {
+                savedKeys = JSON.parse(keysStr);
+            } else {
+                // Backward compatibility: Migrate old keys
+                const primaryGemini = localStorage.getItem('gemini-key') || '';
+                const primaryOpenai = localStorage.getItem('openai-key') || '';
+                if (primaryGemini) {
+                    savedKeys.push({ type: 'gemini', key: primaryGemini });
+                }
+                if (primaryOpenai) {
+                    savedKeys.push({ type: 'openai', key: primaryOpenai });
+                }
+                // Migrate old multi keys if enabled
+                const useMulti = localStorage.getItem('use-multi') === 'true';
+                const multiKeysText = localStorage.getItem('multi-keys') || '';
+                if (useMulti && multiKeysText) {
+                    const lines = multiKeysText.split('\n');
+                    lines.forEach(line => {
+                        line = line.trim();
+                        if (!line) return;
+                        let k = line;
+                        let t = 'gemini';
+                        if (line.includes(':')) {
+                            const parts = line.split(':', 2);
+                            k = parts[1].trim();
+                        }
+                        t = k.startsWith('sk-') ? 'openai' : 'gemini';
+                        if (!savedKeys.some(item => item.key === k)) {
+                            savedKeys.push({ type: t, key: k });
+                        }
+                    });
+                }
+            }
+        } catch (e) {
+            console.error('Migration or parse of API keys failed:', e);
+        }
+
+        if (savedKeys.length === 0) {
+            savedKeys.push({ type: 'gemini', key: '' });
+        }
+
+        currentApiKeys = savedKeys;
+        renderKeysList();
+
+        modelSelect.value = localStorage.getItem('model-name') || 'gemini-3-flash-preview';
         customModelNameInput.value = localStorage.getItem('custom-model') || '';
         settingsIgnoreHandwriting.checked = localStorage.getItem('ignore-handwriting') === 'true';
 
         modelSelect.dispatchEvent(new Event('change'));
-        useMultiKeysInput.dispatchEvent(new Event('change'));
-
         updateApiKeyStatus();
     }
 
     function updateApiKeyStatus() {
-        const geminiKey = geminiApiKeyInput.value.trim();
-        const openaiKey = openaiApiKeyInput.value.trim();
-        const useMulti = useMultiKeysInput.checked;
-        const multiKeys = multiKeysTextInput.value.trim();
-
-        const hasKeys = geminiKey !== '' || openaiKey !== '' || (useMulti && multiKeys !== '');
+        const hasKeys = currentApiKeys.some(item => item.key.trim() !== '');
 
         if (hasKeys) {
             apiStatusBadge.className = 'status-badge good';
@@ -358,13 +449,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     saveSettingsBtn.addEventListener('click', () => {
-        localStorage.setItem('gemini-key', geminiApiKeyInput.value.trim());
-        localStorage.setItem('openai-key', openaiApiKeyInput.value.trim());
-        localStorage.setItem('use-multi', useMultiKeysInput.checked);
-        localStorage.setItem('multi-keys', multiKeysTextInput.value.trim());
+        // Filter out empty rows when saving
+        const filteredKeys = currentApiKeys.filter(item => item.key.trim() !== '');
+        
+        // Save new format
+        localStorage.setItem('geminiocr-api-keys', JSON.stringify(filteredKeys));
+        
+        // Backward compatibility: Save first valid keys to legacy format
+        const firstGemini = filteredKeys.find(item => item.type === 'gemini');
+        const firstOpenai = filteredKeys.find(item => item.type === 'openai');
+        localStorage.setItem('gemini-key', firstGemini ? firstGemini.key.trim() : '');
+        localStorage.setItem('openai-key', firstOpenai ? firstOpenai.key.trim() : '');
+
         localStorage.setItem('model-name', modelSelect.value);
         localStorage.setItem('custom-model', customModelNameInput.value.trim());
         localStorage.setItem('ignore-handwriting', settingsIgnoreHandwriting.checked);
+
+        // Update key rotation index in memory
+        currentApiKeys = filteredKeys.length > 0 ? filteredKeys : [{ type: 'gemini', key: '' }];
+        renderKeysList();
 
         updateApiKeyStatus();
         showToast('設定已儲存成功！ 🌻', 'success');

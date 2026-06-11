@@ -10,33 +10,36 @@ export function setLogger(logger) {
 
 // Parse keys for rotation
 function getAvailableKeys() {
-    const primaryGemini = localStorage.getItem('gemini-key') || '';
-    const primaryOpenai = localStorage.getItem('openai-key') || '';
-    const useMulti = localStorage.getItem('use-multi') === 'true';
-    const multiKeysText = localStorage.getItem('multi-keys') || '';
-
-    let keys = [];
-
-    if (useMulti && multiKeysText) {
-        const lines = multiKeysText.split('\n');
-        lines.forEach((line, index) => {
-            line = line.trim();
-            if (!line) return;
-            if (line.includes(':')) {
-                const [name, key] = line.split(':', 2);
-                keys.push({ name: name.trim(), key: key.trim(), type: key.trim().startsWith('sk-') ? 'openai' : 'gemini' });
-            } else {
-                keys.push({ name: `Key_${index+1}`, key: line, type: line.startsWith('sk-') ? 'openai' : 'gemini' });
-            }
-        });
+    const keys = [];
+    const savedKeysStr = localStorage.getItem('geminiocr-api-keys');
+    if (savedKeysStr) {
+        try {
+            const list = JSON.parse(savedKeysStr);
+            list.forEach((item, index) => {
+                const k = item.key ? item.key.trim() : '';
+                if (!k) return;
+                const name = item.type === 'openai' ? `OpenAI Key ${index + 1}` : `Gemini Key ${index + 1}`;
+                keys.push({
+                    name: name,
+                    key: k,
+                    type: item.type
+                });
+            });
+        } catch (e) {
+            console.error('Failed to parse API keys', e);
+        }
     }
-
-    // Add primary keys if they are not already in list
-    if (primaryGemini && !keys.some(k => k.key === primaryGemini)) {
-        keys.unshift({ name: 'Gemini Primary', key: primaryGemini, type: 'gemini' });
-    }
-    if (primaryOpenai && !keys.some(k => k.key === primaryOpenai)) {
-        keys.push({ name: 'OpenAI Primary', key: primaryOpenai, type: 'openai' });
+    
+    // Fallback/Backward compatibility
+    if (keys.length === 0) {
+        const primaryGemini = localStorage.getItem('gemini-key') || '';
+        const primaryOpenai = localStorage.getItem('openai-key') || '';
+        if (primaryGemini) {
+            keys.push({ name: 'Gemini Primary', key: primaryGemini, type: 'gemini' });
+        }
+        if (primaryOpenai) {
+            keys.push({ name: 'OpenAI Primary', key: primaryOpenai, type: 'openai' });
+        }
     }
 
     return keys;
@@ -54,7 +57,7 @@ export async function callAIApi(promptRule, inputType, base64Image = null) {
         throw new Error('未設定任何 API Key，請前往「金鑰與模型設定」進行設定。');
     }
 
-    const modelName = localStorage.getItem('model-name') || 'gemini-2.5-flash';
+    const modelName = localStorage.getItem('model-name') || 'gemini-3-flash-preview';
     const customModel = localStorage.getItem('custom-model') || '';
     const finalModel = modelName === 'custom' ? customModel : modelName;
 

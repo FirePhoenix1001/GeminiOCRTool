@@ -1017,3 +1017,106 @@ body {
 .hide {
     display: none !important;
 }
+
+/* Settings Tab Flex Alignment (Align button to bottom) */
+#tab-settings.active {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+#tab-settings .form-container {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+    gap: 20px;
+}
+#tab-settings #save-settings-btn {
+    margin-top: auto;
+}
+
+/* Dynamic Key Row Styling */
+.key-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    animation: keyRowSlideDown 0.25s ease forwards;
+}
+
+@keyframes keyRowSlideDown {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.key-row .password-input-wrapper {
+    flex: 1;
+    min-width: 0;
+}
+
+.key-row .key-type-select,
+.key-row .key-value-input {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-family: var(--font-primary);
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.key-row .key-type-select {
+    width: 120px;
+    flex-shrink: 0;
+}
+
+.key-row .key-value-input {
+    width: 100%;
+}
+
+.theme-light .key-row .key-type-select,
+.theme-light .key-row .key-value-input {
+    background: rgba(255, 255, 255, 0.9);
+}
+
+.key-row .key-type-select:focus,
+.key-row .key-value-input:focus {
+    border-color: var(--accent-purple);
+    box-shadow: 0 0 10px rgba(138, 43, 226, 0.15);
+}
+
+/* Dropdown Option List Styling (Fixes low contrast on Chrome/Edge/Firefox) */
+.input-group select option,
+.key-row select option {
+    background-color: #1e182e;
+    color: #e2dcf0;
+}
+
+.theme-light .input-group select option,
+.theme-light .key-row select option {
+    background-color: #ffffff;
+    color: #2b2342;
+}
+
+.key-row .delete-key-row-btn {
+    flex-shrink: 0;
+    height: 38px;
+    width: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 85, 85, 0.2);
+    color: var(--accent-red);
+    background: transparent;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.key-row .delete-key-row-btn:hover {
+    background: rgba(255, 85, 85, 0.1);
+    border-color: var(--accent-red);
+}
+
