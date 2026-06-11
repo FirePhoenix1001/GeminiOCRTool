@@ -964,6 +964,8 @@ ${oldRule}
         wordStartBtn.textContent = '⏳ 優化處理中...';
 
         const options = {
+            convertFont: document.getElementById('word-convert-font').checked,
+            convertItalic: document.getElementById('word-convert-italic').checked,
             minusToHyphen: document.getElementById('word-minus-to-hyphen').checked,
             hyphenToMinus: document.getElementById('word-hyphen-to-minus').checked,
             convertSuper: document.getElementById('word-convert-super').checked,
