@@ -1,4 +1,4 @@
-// api.js - GeminiOCR API Communication Module
+import { DEFAULT_MODEL } from './config.js';
 
 let logMsg = console.log;
 
@@ -57,7 +57,7 @@ export async function callAIApi(promptRule, inputType, base64Image = null) {
         throw new Error('未設定任何 API Key，請前往「金鑰與模型設定」進行設定。');
     }
 
-    const modelName = localStorage.getItem('model-name') || 'gemini-3-flash-preview';
+    const modelName = localStorage.getItem('model-name') || DEFAULT_MODEL;
     const customModel = localStorage.getItem('custom-model') || '';
     const finalModel = modelName === 'custom' ? customModel : modelName;
 

@@ -3,6 +3,7 @@
 import { callAIApi, setLogger } from './api.js';
 import { convertPdfPageToPngBase64, readImageAsBase64, getPdfPageCount } from './pdf.js';
 import { buildWordDocument, triggerTxtDownload, optimizeWordFile } from './word.js';
+import { VERSION, DEFAULT_MODEL } from './config.js';
 
 // Default rules (Prompts) from original project
 const DEFAULT_OCR_RULE = `<role>
@@ -187,6 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Register our UI logger with the API module
     setLogger(logMsg);
+    logMsg(`[SYSTEM] 當前版本：${VERSION}`);
 
     clearLogsBtn.addEventListener('click', () => {
         terminalConsole.innerHTML = '<div class="log-line system-line">[SYSTEM] 控制台日誌已清除。🌻</div>';
@@ -424,7 +426,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentApiKeys = savedKeys;
         renderKeysList();
 
-        modelSelect.value = localStorage.getItem('model-name') || 'gemini-3-flash-preview';
+        modelSelect.value = localStorage.getItem('model-name') || DEFAULT_MODEL;
         customModelNameInput.value = localStorage.getItem('custom-model') || '';
         settingsIgnoreHandwriting.checked = localStorage.getItem('ignore-handwriting') === 'true';
 
