@@ -3,7 +3,7 @@ import { viteSingleFile } from 'vite-plugin-singlefile';
 import path from 'path';
 
 export default defineConfig({
-  root: path.resolve(__dirname, 'src/web'),
+  root: path.resolve(__dirname, 'src'),
   plugins: [viteSingleFile()],
   build: {
     outDir: path.resolve(__dirname, 'dist'),

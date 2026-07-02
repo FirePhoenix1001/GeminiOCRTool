@@ -48,14 +48,15 @@ export function parseSubscriptSuperscript(text) {
 }
 
 // Build a formatted Word (.docx) document from OCR/detailed description texts
-export async function buildWordDocument(text, filename) {
+export async function buildWordDocument(text, filename, options = {}) {
+    const { autoCorrectScript = true } = options;
     const mathFunctions = ['sin', 'cos', 'tan', 'log'];
     const paragraphs = [];
 
     const lines = text.split('\n');
     for (let line of lines) {
         const runs = [];
-        const segments = parseSubscriptSuperscript(line);
+        const segments = autoCorrectScript ? parseSubscriptSuperscript(line) : [{ text: line, style: 'normal' }];
 
         for (let segment of segments) {
             const segmentText = segment.text;

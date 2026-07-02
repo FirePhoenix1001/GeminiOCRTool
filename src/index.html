@@ -127,6 +127,16 @@
                                         <span class="checkbox-box"></span>
                                         <span class="checkbox-label">忽略工作區域手寫字體 (排除手寫批改，專注於印刷體公式)</span>
                                     </label>
+                                    <label class="custom-checkbox-row">
+                                        <input type="checkbox" id="ocr-auto-correct-script">
+                                        <span class="checkbox-box"></span>
+                                        <span class="checkbox-label">自動修正上下標：將 ^{} 和 _{} 轉換為 Word 格式上下標</span>
+                                    </label>
+                                    <label class="custom-checkbox-row">
+                                        <input type="checkbox" id="ocr-output-txt">
+                                        <span class="checkbox-box"></span>
+                                        <span class="checkbox-label">同時輸出 TXT 檔案 (備份純文字版本)</span>
+                                    </label>
                                 </div>
                                 <div class="btn-actions-row">
                                     <button id="ocr-edit-rule-btn" class="action-btn btn-purple"><i
@@ -204,6 +214,18 @@
                                             <button class="stepper-btn plus" data-target="explain-global-end" type="button" tabindex="-1">+</button>
                                         </div>
                                     </div>
+                                </div>
+                                <div class="checkbox-grid" style="margin-top: 10px; margin-bottom: 15px;">
+                                    <label class="custom-checkbox-row">
+                                        <input type="checkbox" id="explain-auto-correct-script">
+                                        <span class="checkbox-box"></span>
+                                        <span class="checkbox-label">自動修正上下標：將 ^{} 和 _{} 轉換為 Word 格式上下標</span>
+                                    </label>
+                                    <label class="custom-checkbox-row">
+                                        <input type="checkbox" id="explain-output-txt">
+                                        <span class="checkbox-box"></span>
+                                        <span class="checkbox-label">同時輸出 TXT 檔案 (備份純文字版本)</span>
+                                    </label>
                                 </div>
                                 <div class="btn-actions-row">
                                     <button id="explain-edit-rule-btn" class="action-btn btn-purple"><i

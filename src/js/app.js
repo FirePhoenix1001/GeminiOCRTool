@@ -953,6 +953,9 @@ ${oldRule}
         renderFileList(filesArray, `${type}-file-list`, `${type}-file-count`, type);
         logMsg(`[SYSTEM] 🚀 開始處理 ${totalFiles} 個任務 (${type === 'ocr' ? 'OCR 辨識' : '詳解生成'})...`);
 
+        const autoCorrectScript = document.getElementById(`${type}-auto-correct-script`).checked;
+        const outputTxt = document.getElementById(`${type}-output-txt`).checked;
+
         try {
             let rulePrompt = getRule(type);
             if (type === 'ocr' && settingsIgnoreHandwriting.checked) {
@@ -1019,8 +1022,10 @@ ${oldRule}
                 if (fileTexts.trim() !== '') {
                     logMsg(`💾 生成 Word 檔案: ${outputName}.docx...`);
                     const wordCleanText = fileTexts.replace(/##### Page \d+ #####\n?/g, '');
-                    await buildWordDocument(wordCleanText, outputName);
-                    triggerTxtDownload(txtTempContent, `${outputName}.txt`);
+                    await buildWordDocument(wordCleanText, outputName, { autoCorrectScript });
+                    if (outputTxt) {
+                        triggerTxtDownload(txtTempContent, `${outputName}.txt`);
+                    }
                 }
 
                 processedFilesCount++;
