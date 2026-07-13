@@ -280,6 +280,11 @@ body {
     overflow-y: auto;
     /* Reserve space for footer logs */
     margin-bottom: 125px;
+    transition: margin-bottom 0.3s ease;
+}
+/* Extra scroll space when progress bar is visible */
+.tab-contents.processing {
+    margin-bottom: 185px;
 }
 
 .tab-pane {
@@ -869,18 +874,19 @@ body {
 
 /* Sticky Progress HUD */
 .progress-container {
-    position: absolute;
-    bottom: 125px;
+    position: fixed;
+    bottom: 120px;
     left: 20px;
     right: 20px;
-    background: rgba(30, 24, 46, 0.9);
+    background: rgba(30, 24, 46, 0.95);
     backdrop-filter: var(--blur-card);
     -webkit-backdrop-filter: var(--blur-card);
     border: 1px solid var(--border-color-active);
     border-radius: 12px;
     padding: 12px 20px;
     box-shadow: 0 4px 30px rgba(0,0,0,0.3);
-    z-index: 100;
+    z-index: 200;
+    pointer-events: none;
 }
 .theme-light .progress-container {
     background: rgba(255, 255, 255, 0.95);

@@ -944,6 +944,7 @@ ${oldRule}
         stopBtn.disabled = false;
         stopBtn.classList.remove('hide');
         progressContainer.classList.remove('hide');
+        document.querySelector('.tab-contents').classList.add('processing');
 
         outputArea.value = '';
         
@@ -1014,13 +1015,12 @@ ${oldRule}
                     }
                 }
 
-                if (stopRequested) break;
-
+                // Always export accumulated results for the current file, even if stopped mid-way
                 outputArea.value += `--- ${item.file.name} ---\n${fileTexts}\n\n`;
                 outputArea.scrollTop = outputArea.scrollHeight;
 
                 if (fileTexts.trim() !== '') {
-                    logMsg(`💾 生成 Word 檔案: ${outputName}.docx...`);
+                    logMsg(`💾 生成 Word 檔案: ${outputName}.docx${stopRequested ? ' (已中斷，匯出目前進度)' : ''}...`);
                     const wordCleanText = fileTexts.replace(/##### Page \d+ #####\n?/g, '');
                     await buildWordDocument(wordCleanText, outputName, { autoCorrectScript });
                     if (outputTxt) {
@@ -1030,11 +1030,13 @@ ${oldRule}
 
                 processedFilesCount++;
                 updateProgress(`✅ 已處理完成: ${item.file.name}`, Math.floor((processedFilesCount / totalFiles) * 100));
+
+                if (stopRequested) break;
             }
 
             if (stopRequested) {
-                logMsg('[SYSTEM] 🛑 任務已被使用者強制中斷！', 'error');
-                showToast('任務已中斷', 'warning');
+                logMsg(`[SYSTEM] 🛑 任務已被使用者強制中斷！已完成 ${processedFilesCount}/${totalFiles} 個檔案的處理，已匯出目前進度。`, 'error');
+                showToast(`任務已中斷，已匯出 ${processedFilesCount} 個檔案的進度`, 'warning');
             } else {
                 logMsg('✅ ✅ ✅ 所有檔案處理完畢！已全部導出為 Word 下載。');
                 showToast('轉換成功完成！🌻', 'success');
@@ -1051,6 +1053,7 @@ ${oldRule}
             
             setTimeout(() => {
                 progressContainer.classList.add('hide');
+                document.querySelector('.tab-contents').classList.remove('processing');
             }, 3000);
 
             renderFileList(filesArray, `${type}-file-list`, `${type}-file-count`, type);

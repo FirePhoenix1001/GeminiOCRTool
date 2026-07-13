@@ -48,6 +48,30 @@ function getAvailableKeys() {
 // Sleep helper for backoff
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Page Visibility guard: pauses execution when the browser tab/display is inactive.
+// This prevents API calls from being made while the system is in sleep/display-off mode,
+// which would cause "Failed to fetch" or undefined errors.
+async function waitForPageVisible() {
+    if (typeof document === 'undefined') return; // SSR/Node guard
+    if (document.visibilityState === 'visible') return;
+
+    logMsg('💤 偵測到頁面處於背景/螢幕關閉狀態，暫停處理中... (恢復後將自動繼續)');
+    
+    await new Promise(resolve => {
+        const onVisible = () => {
+            if (document.visibilityState === 'visible') {
+                document.removeEventListener('visibilitychange', onVisible);
+                resolve();
+            }
+        };
+        document.addEventListener('visibilitychange', onVisible);
+    });
+
+    // After waking up, wait a moment for the network stack to fully recover
+    logMsg('☀️ 頁面已恢復前景，等待 3 秒讓網路連線穩定後繼續...');
+    await sleep(3000);
+}
+
 let currentKeyIndex = 0;
 
 // Call API with Key Rotation and Exponential Backoff Retry
@@ -82,6 +106,9 @@ export async function callAIApi(promptRule, inputType, base64Image = null) {
 
         while (retryCount <= maxRetries) {
             try {
+                // Guard: wait if page is hidden (display off / system sleep)
+                await waitForPageVisible();
+
                 if (currentKeyInfo.type === 'openai' || finalModel.startsWith('gpt') || finalModel.startsWith('o1')) {
                     result = await fetchOpenai(currentKeyInfo.key, finalModel, promptRule, inputType, base64Image);
                 } else {
@@ -94,8 +121,19 @@ export async function callAIApi(promptRule, inputType, base64Image = null) {
                 const errStr = (err.message || '').toLowerCase();
                 const isHighDemand = errStr.includes('high demand') || errStr.includes('spikes in demand');
                 
+                // Detect network-level transient errors (browser fetch failures)
+                const isNetworkError = errStr.includes('failed to fetch') ||
+                                       errStr.includes('networkerror') ||
+                                       errStr.includes('network') ||
+                                       errStr.includes('timeout') ||
+                                       errStr.includes('aborted') ||
+                                       errStr.includes('econnreset') ||
+                                       errStr.includes('cors') ||
+                                       errStr === '' || errStr === 'undefined';
+
                 // Detect retryable errors (Busy servers, rate limits, overloads)
-                const isRetryable = errStr.includes('429') || 
+                const isRetryable = isNetworkError ||
+                                    errStr.includes('429') || 
                                     errStr.includes('resource_exhausted') || 
                                     errStr.includes('demand') || 
                                     errStr.includes('overloaded') || 
@@ -131,11 +169,13 @@ export async function callAIApi(promptRule, inputType, base64Image = null) {
                     }
 
                     // High demand or other retryable errors
-                    const currentMaxRetries = isHighDemand ? 5 : maxRetries; // Retry up to 5 times for high demand
+                    const currentMaxRetries = isHighDemand ? 5 : (isNetworkError ? 4 : maxRetries);
                     if (retryCount < currentMaxRetries) {
                         retryCount++;
-                        const delay = baseDelay * Math.pow(2, retryCount - 1) + Math.random() * 1000;
-                        logMsg(`⚠️ [限流重試] 伺服器忙碌或限制: ${err.message}`);
+                        const delay = isNetworkError
+                            ? (baseDelay * Math.pow(2, retryCount - 1) + Math.random() * 2000) // Longer jitter for network errors
+                            : (baseDelay * Math.pow(2, retryCount - 1) + Math.random() * 1000);
+                        logMsg(`⚠️ [${isNetworkError ? '網路重試' : '限流重試'}] ${isNetworkError ? '網路連線異常' : '伺服器忙碌或限制'}: ${err.message || '(未知錯誤)'}`);
                         logMsg(`⏱️ 啟用指數型退避等待，將於 ${(delay / 1000).toFixed(1)} 秒後進行第 ${retryCount} 次重試...`);
                         await sleep(delay);
                     } else {
@@ -151,7 +191,13 @@ export async function callAIApi(promptRule, inputType, base64Image = null) {
             return result;
         } else {
             const errStr = (lastError.message || '').toLowerCase();
-            const triggersRotation = errStr.includes('429') || 
+            const isNetworkErr = errStr.includes('failed to fetch') ||
+                                 errStr.includes('networkerror') ||
+                                 errStr.includes('network') ||
+                                 errStr.includes('timeout') ||
+                                 errStr === '' || errStr === 'undefined';
+            const triggersRotation = isNetworkErr ||
+                                     errStr.includes('429') || 
                                      errStr.includes('resource_exhausted') || 
                                      errStr.includes('limit') || 
                                      errStr.includes('key') || 
@@ -163,7 +209,7 @@ export async function callAIApi(promptRule, inputType, base64Image = null) {
                                      errStr.includes('try again');
             
             if (triggersRotation && keys.length > 1) {
-                logMsg(`⚠️ 金鑰【${currentKeyInfo.name}】連線超額且重試失敗: ${lastError.message}`, 'error');
+                logMsg(`⚠️ 金鑰【${currentKeyInfo.name}】${isNetworkErr ? '網路連線異常' : '連線超額'}且重試失敗: ${lastError.message || '(未知錯誤)'}`, 'error');
                 currentKeyIndex = (currentKeyIndex + 1) % keys.length;
                 logMsg(`🔄 嘗試切換至下一組金鑰...`);
                 attempts++;
@@ -171,6 +217,32 @@ export async function callAIApi(promptRule, inputType, base64Image = null) {
             } else {
                 throw lastError; // Re-throw fatal error
             }
+        }
+    }
+
+    // All keys exhausted — perform a final cooldown retry cycle
+    logMsg(`⚠️ 所有金鑰均已嘗試失敗，啟動冷卻期後最終重試...`, 'warning');
+    logMsg(`⏱️ 等待 30 秒冷卻後重新嘗試所有金鑰...`);
+    await sleep(30000);
+
+    // One final attempt cycling through all keys (no further cooldown)
+    for (let i = 0; i < keys.length; i++) {
+        const keyIdx = (currentKeyIndex + i) % keys.length;
+        const keyInfo = keys[keyIdx];
+        logMsg(`🔑 [最終重試] 嘗試金鑰: 【${keyInfo.name}】`);
+        try {
+            await waitForPageVisible(); // Guard against display-off
+            let finalResult;
+            if (keyInfo.type === 'openai' || finalModel.startsWith('gpt') || finalModel.startsWith('o1')) {
+                finalResult = await fetchOpenai(keyInfo.key, finalModel, promptRule, inputType, base64Image);
+            } else {
+                finalResult = await fetchGemini(keyInfo.key, finalModel, promptRule, inputType, base64Image);
+            }
+            currentKeyIndex = keyIdx; // Update to the successful key
+            logMsg(`✅ [最終重試] 金鑰【${keyInfo.name}】成功！`);
+            return finalResult;
+        } catch (finalErr) {
+            logMsg(`⚠️ [最終重試] 金鑰【${keyInfo.name}】失敗: ${finalErr.message || '(未知錯誤)'}`);
         }
     }
 
