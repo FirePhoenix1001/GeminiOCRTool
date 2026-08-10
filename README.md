@@ -45,6 +45,8 @@
 
 *   **`C:\PythonProgram\GeminiOCRTool\`** (專案根目錄)
     *   `index.html` - 自動打包後的最終自包含 HTML 檔案（雙擊即可直接運行，無需任何環境）。
+    *   `prompt.txt` - OCR 數學轉錄專用提示詞規則檔。
+    *   `prompt_explain.txt` - 詳解生成專用提示詞規則檔。
     *   `package.json` - 前端套件依賴與 npm 打包腳本。
     *   `vite.config.js` - Vite 編譯與單一 HTML 插件配置。
     *   `copy-build.js` - 自動複製打包結果至根目錄的 Node.js 腳本。

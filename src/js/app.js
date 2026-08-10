@@ -5,116 +5,9 @@ import { convertPdfPageToPngBase64, readImageAsBase64, getPdfPageCount } from '.
 import { buildWordDocument, triggerTxtDownload, optimizeWordFile } from './word.js';
 import { VERSION, DEFAULT_MODEL } from './config.js';
 
-// Default rules (Prompts) from original project
-const DEFAULT_OCR_RULE = `<role>
-你是一位追求「100% 忠實還原」的 OCR 數學數位化專家，擅長以「純文字為主、LaTeX 為輔」的方式排版。
-</role>
-
-<rules>
-1. **LaTeX 使用的絕對禁令（環境繼承原則）：**
-   - **唯一例外：** **只有在出現「分數 \\frac{}{}」、「根號 \\sqrt{}{}」、「聯立方程式（如 \\begin{cases}）」及「矩陣（如 \\begin{matrix}）」時，才允許使用 $...$。**
-   - **環境繼承：** 一旦進入 $ 內部，所有內容（含運算符、上下標、變數、矩陣元素）必須統一採用 LaTeX 寫法（如 \\times, n_{1}, \\text{matrix} 語法）。
-
-2. **純文字優先與簡化標記（最高準則）：**
-   - **一般變數：** 所有的變數、數字、希臘字母、邏輯符號、比較符號，只要在 $ 之外，一律採純文字，嚴禁包進 $ 內。
-   - **上下標處理：** 在 $ 之外時，直接使用 \`_{}\` 表示下標，\`^{}\` 表示上標（例如：L_{1}, x^{2}, (y-2)^{2}）。
-   - **範例：** 使用 x≈y±z 而不是 $x$≈$y$±$z$。
-
-3. **符號清單（限純文字顯示）：**
-   - **關係：** <, >, =, ≤, ≥, ≠, ≈, ±, ⊥, °。
-   - **邏輯：** ∵, ∴, ⇒, ⇔, ∈。
-   - **運算：** ×, -, ·, π, …, ∠, $\\overline{AB}$ (上劃線仍可用 $)。
-   - **希臘/序號：** θ, α, β, Γ, ①, ②。
-   - **函數：** log, sin, cos, tan。
-   - **是非 :  ** ◯, ✕。
-
-4. **排版要求：**
-   - **圖片標記：** 若有輔助圖片，請換行註記 *********[缺圖]*********。
-   - **結構保持：** 保持原始段落與行序，題號格式依原樣，結尾「選( )」照原樣。
-   - **禁令：** 忽略最下方頁碼；不使用任何 Markdown 格式語法。
-</rules>
-
-<examples>
-以下為「純文字優先」的正確排版範例：
-
-- **變數與比較（不包 $）：**
-  正確：x≈y±z
-  正確：x∈A ⇒ x≠①
-
-- **幾何與邏輯：**
-  正確：∵ ∠α=∠β ∴ △ABC 為等腰三角形。
-  正確：$\\overline{AB}$=\\overline{AC}$
-
-- **矩陣處理（必須使用 LaTeX）：**
-  正確：若 A = $\\left[ \\begin{matrix} -2 & 4 \\\\ 1 & 3 \\\\ 7 & -3 \\end{matrix} \\right]$ , 則 2A = $\\left[ \\begin{matrix} -4 & 4 \\\\ 2 & 3 \\\\ 14 & -3 \\end{matrix} \\right]$
-
-- **必須使用 LaTeX 的情境（分數、根號、聯立）：**
-  正確：$\\frac{1}{2}$+$\\frac{\\sqrt{3}}{2}$ = $\\frac{1+\\sqrt{3}}{2}$
-  正確：(A) $\\begin{cases} a+2\\theta\\beta>0 \\\\ 7a-24b\\theta\\beta+22>0 \\end{cases}$
-
-- **函數與運算：**
-  正確：log 2 + sin θ = 1
-  正確：3 × 2 = 6
-
-- **一般上下標（使用純文字標記）：**
-  正確：L_{1}: 2x-y+a=0
-  正確：(x+3)^{2}+(y-2)^{2}=60
-
-- **複合環境（環境繼承）：**
-  正確：$\\frac{\\pi n_{1}}{\\pi}$ = n_{1}
-  （解釋：因為在分數內，所以 n_{1} 必須進入 $ 環境；但等號後的結果回歸純文字標記。）
-</examples>
-
-<task>
-根據上述「純文字標記優先」規則，將提供圖片內容轉錄為文字。
-你的核心任務是將圖片中的數學內容「完全相符」地轉錄為文字，嚴禁任何擅自的簡化、省略 or 美化。
-</task>`;
-
-const DEFAULT_EXPLAIN_RULE = `<role>
-你是一位極其專業且耐心的「數學詳解專家」，擅長以「純文字為主、LaTeX 為輔」的方式，為數學題目提供步驟詳盡、邏輯嚴密的解答。
-你的目標是：不僅給出正確答案，更要讓學生看懂解題的每一個轉折。
-</role>
-
-<rules>
-1. **LaTeX 使用的絕對禁令（環境繼承原則）：**
-   - **唯一例外：** ** 只有在出現「分數 \\frac{}{}」、「根號 \\sqrt{}{}」及「**聯立方程式（如 \\begin{cases}）**」時，才允許使用 $...$。
-   - **環境繼承：** 一旦進入 $ 內部，所有內容（含運算符、上下標、變數）必須統一採用 LaTeX 寫法（如 \\times, n_{1}）。
-
-2. **純文字優先與簡化標記（最高準則）：**
-   - **一般變數：** 所有的變數、數字、希臘字母、邏輯符號、比較符號，只要在 $ 之外，一律採純文字，嚴禁包進 $ 內。
-   - **上下標處理：** 在 $ 之外時，直接使用 \`_{}\` 表示下標，\`^{}\` 表示上標（例如：L_{1}, x^{2}, (y−2)^{2}）。
-   - **範例：** 使用 x≈y±z 而不是 $x$≈$y$±$z$。
-
-3. **符號清單（限純文字顯示）：**
-   - **關係：** <, >, =, ≤, ≥, ≠, ≈, ±。
-   - **邏輯：** ∵, ∴, ⇒, ⇔, ∈。
-   - **運算：** ×, ·, π, …, ∠, $\\overline{AB}$ (上劃線仍可用 $)。
-   - **希臘/序號：** θ, α, β, Γ, ①, ②。
-   - **函數：** log, sin, cos, tan。
-
-4. **解題結構：**
-   - **題目：** 先簡短摘要題目內容。
-   - **詳解：** 分步驟說明解法，推導邏輯需流暢且明確。
-   - **答案：** 在最後明確標註最終答案。
-   - **禁令：** 不使用 any Markdown 格式語法。
-</rules>
-
-<examples>
-以下為符合「純文字優先」規則的詳解排版範例：
-
-- **題目摘要：** 若 x+y=5 且 xy=6，求 x^{2}+y^{2} 之值。
-- **詳解：** 
-  ∵ (x+y)^{2} = x^{2}+2xy+y^{2}
-  ∴ 5^{2} = x^{2}+2(6)+y^{2}
-  25 = x^{2}+12+y^{2}
-  x^{2}+y^{2} = 25−12 = 13
-- **答案：** 13
-</examples>
-
-<task>
-根據上述「純文字標記優先」規則與「詳解專家」角色，分析圖片中的數學題目並生成詳解。
-請確保推導過程嚴謹，格式美觀且符合上述 LaTeX 禁令與純文字優先原則。
-</task>`;
+// Default rules (Prompts) loaded from external txt files
+import DEFAULT_OCR_RULE from '../../prompt.txt?raw';
+import DEFAULT_EXPLAIN_RULE from '../../prompt_explain.txt?raw';
 
 document.addEventListener('DOMContentLoaded', () => {
     // Arrays to hold files
@@ -829,6 +722,50 @@ document.addEventListener('DOMContentLoaded', () => {
         showToast('規則已儲存成功！', 'success');
         logMsg(`[SYSTEM] 已更新 ${activeRuleType === 'ocr' ? 'OCR' : '詳解'} Prompt 規則設定。`);
     });
+
+    
+    const ruleFileInput = document.getElementById('rule-file-input');
+    const ruleModalImportBtn = document.getElementById('rule-modal-import-btn');
+    const ruleModalExportBtn = document.getElementById('rule-modal-export-btn');
+
+    if (ruleModalImportBtn && ruleFileInput) {
+        ruleModalImportBtn.addEventListener('click', () => {
+            ruleFileInput.value = '';
+            ruleFileInput.click();
+        });
+
+        ruleFileInput.addEventListener('change', (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const content = event.target.result;
+                ruleModalTextarea.value = content;
+                showToast(`已成功載入檔案：${file.name}`, 'success');
+                logMsg(`[SYSTEM] 已從檔案載入 Prompt (${file.name})`);
+            };
+            reader.onerror = () => {
+                showToast('讀取檔案失敗！', 'error');
+            };
+            reader.readAsText(file, 'utf-8');
+        });
+    }
+
+    if (ruleModalExportBtn) {
+        ruleModalExportBtn.addEventListener('click', () => {
+            const content = ruleModalTextarea.value;
+            const filename = activeRuleType === 'ocr' ? 'prompt.txt' : 'prompt_explain.txt';
+            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast(`已匯出 ${filename}`, 'success');
+        });
+    }
 
     ruleModalResetBtn.addEventListener('click', () => {
         if (confirm('確定要還原成預設規則嗎？這將會覆寫您的修改。')) {

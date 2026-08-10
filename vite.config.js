@@ -5,6 +5,11 @@ import path from 'path';
 export default defineConfig({
   root: path.resolve(__dirname, 'src'),
   plugins: [viteSingleFile()],
+  server: {
+    fs: {
+      allow: ['..']
+    }
+  },
   build: {
     outDir: path.resolve(__dirname, 'dist'),
     emptyOutDir: true,
